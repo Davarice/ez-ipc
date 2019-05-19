@@ -3,20 +3,25 @@ import asyncio
 
 class Server:
     def __init__(self, addr: str = "127.0.0.1", port: int = 1729):
-        self.loop = asyncio.get_event_loop()
-        self.startup = asyncio.start_server(
-            self.receive_request, addr, port, loop=self.loop
-        )
+        self.addr = addr
+        self.port = port
+        self.loop = None
         self.running = None
+        self.startup = None
 
-    def setup(self, *a, **kw):
-        """Execute all prerequisites to running, before running. Meant to be
-            overwritten by Subclasses.
-        """
-        pass
+    def attach(self, loop=None):
+        """Attach to an Event Loop."""
+        self.loop = loop or asyncio.get_event_loop()
+        self.startup = asyncio.start_server(
+            self.accept_connection, self.addr, self.port, loop=self.loop
+        )
 
     def run(self, *a, **kw):
-        self.setup(*a, **kw)
+        """Execute final Setup, and then run the Server."""
+        if not self.loop:
+            return
+
+        self._setup(*a, **kw)
         self.running = self.loop.run_until_complete(self.startup)
 
         try:
@@ -27,21 +32,32 @@ class Server:
         else:
             print("Server closing...")
         finally:
+            self.kill()
+
+    def _setup(self, *a, **kw):
+        """Execute all prerequisites to running, before running. Meant to be
+            overwritten by Subclasses.
+        """
+        pass
+
+    def kill(self):
+        if self.running:
             self.running.close()
             self.loop.run_until_complete(self.running.wait_closed())
-            self.loop.close()
-            print("Server closed.")
+            self.running = None
+        self.loop.close()
+        print("Server closed.")
 
-    async def receive_request(
+    async def accept_connection(
         self, str_in: asyncio.StreamReader, str_out: asyncio.StreamWriter
     ):
-        """Callback executed by ASyncIO when a Client contacts the Server.
-            Example/test method, meant to be overwritten by Subclasses.
-        """
-        print("Receiving Request...")
+        """Callback executed by ASyncIO when a Client contacts the Server."""
+        print("Incoming Connection from Client at `{}`.".format(str_out.get_extra_info("peername", "Unknown Address")))
         line: bytes = await str_in.readline()
         print("Received {} bytes from Client.".format(len(line.decode("utf-8"))))
         str_out.write(b"ACK %d\n" % len(line))
 
 
-Server().run()
+z = Server()
+z.attach()
+z.run()
