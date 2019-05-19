@@ -37,15 +37,15 @@ class Client:
             self.addr, self.port, loop=self.loop
         )
 
-        for i in range(5):
+        for i in ["aaaa", "zxcv", "END"]:
             await asyncio.sleep(3)
             print("Sending...")
             self.str_out.write((str(i) + "\n").encode("utf-8"))
+            await self.str_out.drain()
             print("Sent.")
-            # await self.str_out.drain()
             print("Reading...")
-            line: bytes = await self.str_in.read(100)
-            print("Received Server response: {}".format(line.decode()))
+            line: bytes = await self.str_in.readline()
+            print("Received Server response: {}".format(repr(line)))
 
 
 Client().run()
