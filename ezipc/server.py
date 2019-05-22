@@ -14,7 +14,7 @@ class Server:
         self.addr = addr
         self.port = port
 
-        self.remotes = set()
+        self.clients = set()
         self.server = None
 
     def _setup(self, *a, **kw):
@@ -22,6 +22,14 @@ class Server:
             overwritten by Subclasses.
         """
         pass
+
+    async def kill(self):
+        for client in self.clients:
+            client.kill()
+        if self.server.is_serving():
+            self.server.close()
+            await self.server.wait_closed()
+        print("Server closed.")
 
     async def open_connection(
         self, str_in: asyncio.StreamReader, str_out: asyncio.StreamWriter
@@ -32,32 +40,35 @@ class Server:
                 str_out.get_extra_info("peername", "Unknown Address")
             )
         )
-        con = Tunnel(str_in, str_out)
-        self.remotes.add(con)
-        await asyncio.create_task(con.loop())
+        client = Tunnel(str_in, str_out)
+        self.clients.add(client)
+        await client.loop()
 
-    async def run(self, *a, **kw):
-        """Execute final Setup, and then run the Server."""
+    async def run(self, loop=None):
+        """Server Coroutine. Does not setup or wrap the Server. Intended for use
+            in instances where other things must be done, and the Server needs
+            to be run properly asynchronously.
+        """
+        print("Running Server on {}:{}".format(self.addr, self.port))
+        self.server = await asyncio.start_server(
+            self.open_connection,
+            self.addr,
+            self.port,
+            loop=loop or asyncio.get_event_loop(),
+        )
+        await self.server.serve_forever()
+
+    def start(self, *a, **kw):
+        """Run alone and do nothing else. For very simple implementations that
+            do not need to do anything else at the same time.
+        """
         self._setup(*a, **kw)
 
         try:
-            print("Running Server on {}:{}".format(self.addr, self.port))
-            self.server = await asyncio.start_server(
-                self.open_connection, self.addr, self.port
-            )
-            await self.server.serve_forever()
+            asyncio.run(self.run())
         except KeyboardInterrupt:
             print("INTERRUPTED. Server closing...")
         else:
             print("Server closing...")
         finally:
-            await self.kill()
-
-    async def kill(self):
-        if self.server.is_serving():
-            self.server.close()
-            await self.server.wait_closed()
-        print("Server closed.")
-
-
-asyncio.run(Server().run())
+            asyncio.run(self.kill())

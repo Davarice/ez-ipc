@@ -33,7 +33,7 @@ class Tunnel:
             data = protocol.unpack(await nextline(self.instr))
         except IndexError:
             raise ConnectionResetError("Stream Ended.")
-        await asyncio.sleep(0.1)  # Allow a moment to finalize.
+        await asyncio.sleep(0.2)  # Allow a moment to finalize.
 
         if "error" in data or "result" in data:
             # Message is a RESPONSE.
@@ -73,19 +73,23 @@ class Tunnel:
         """
         self.need_response[uuid] = func
 
+    def kill(self):
+        self.outstr.close()
+        if self.group is not None and self in self.group:
+            self.group.remove(self)
+
     async def loop(self):
         try:
             while True:
                 await self.get_data()
-
         except EOFError:
             print("Connection with {} hit EOF.".format(self.host))
         except ConnectionError as e:
             print("Connection with {} closed: {}".format(self.host, e))
+        except asyncio.CancelledError:
+            print("Connection with {} was cancelled.".format(self.host))
         finally:
-            self.outstr.close()
-            if self.group is not None and self in self.group:
-                self.group.remove(self)
+            self.kill()
 
     async def notif(self, meth: str, params=None):
         """Assemble and send a JSON-RPC Notification with the given data."""

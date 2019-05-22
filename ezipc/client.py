@@ -8,6 +8,7 @@ class Client:
         self.addr = addr
         self.port = port
         self.con = None
+        self.listening = None
 
     def _setup(self, *a, **kw):
         """Execute all prerequisites to running, before running. Meant to be
@@ -16,42 +17,29 @@ class Client:
         pass
 
     async def connect(self):
+        self._setup()
         streams = await asyncio.open_connection(self.addr, self.port)
         self.con = Tunnel(*streams)
+        print("Connected to {}.".format(self.con.host))
 
-    async def execute(self):
-        """Core execution method, should return usable Stream objects.
-            Example/test method, meant to be overwritten by Subclasses.
-        """
-        print("Connecting...")
-        await self.connect()
+    def run_through(self, *coros):
+        async def run():
+            await self.connect()
+            listening = asyncio.create_task(self.con.loop())
 
-        print("Sending Requests in three seconds.")
-        for i in ["aaaa", "zxcv", "END"]:
-            await asyncio.sleep(3)
-            print("Sending...")
-            uuid, ts = await self.con.request("ping", [i])
-            self.con.hook_response(uuid.hex, self.receive)
-            print("Sent. Waiting for Response...")
-            await self.con.get_data()
+            for coro in coros:
+                await coro(self)
 
-    async def receive(self, data):
-        print("Received Server response: {}".format(repr(data)))
-
-    async def run(self, *a, **kw):
-        self._setup(*a, **kw)
+            await asyncio.sleep(1)
+            listening.cancel()
 
         try:
-            print("Running Client...")
-            await self.execute()
+            asyncio.run(run())
         except ConnectionError as e:
             print("{}: {}".format(type(e).__name__, e))
         except KeyboardInterrupt:
             print("INTERRUPTED. Client closing...")
         else:
-            print("Client closing...")
+            print("Done.")
         finally:
-            print("Client closed.")
-
-
-asyncio.run(Client().run())
+            self.con.kill()
