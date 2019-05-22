@@ -10,6 +10,7 @@ from uuid import uuid4
 
 
 JSON_OPTS = {"separators": (",", ":")}
+__version__ = "2.0"
 
 
 def _make(meth: str, *args, **kwargs) -> dict:
@@ -23,20 +24,27 @@ def _make(meth: str, *args, **kwargs) -> dict:
         params = None
 
     return {
-            "jsonrpc": "2.0",
+            "jsonrpc": __version__,
             "method": meth,
             "params": params,
         } if params else {
-            "jsonrpc": "2.0",
+            "jsonrpc": __version__,
             "method": meth,
         }
 
 
-def id_new():
+def _id_new() -> str:
     return uuid4().hex
 
 
 def error(code: int, message: str, data=None) -> dict:
+    """Make an Error, to be sent in a Response to a failed Request.
+
+    Contains:
+        "code" (int): The identifier of the error type.
+        "message" (str): Short description of the error.
+        ["data"] (any): A value containing further information.
+    """
     err = {"code": code, "message": message}
     if data is not None:
         err["data"] = data
@@ -44,6 +52,15 @@ def error(code: int, message: str, data=None) -> dict:
 
 
 def notif(*args, **kwargs) -> bytes:
+    """Make a Notification, to be sent without expectation of a Response.
+
+    Contains:
+        "jsonrpc" (str): Protocol specifier, must be "2.0".
+        "method" (str): The name of the method to be invoked; Loosely, "why this
+            request is being made".
+        ["params"] (list, dict): The values to be used in the execution of the
+            method specified.
+    """
     req = _make(*args, **kwargs)
 
     return json.dumps(
@@ -53,8 +70,13 @@ def notif(*args, **kwargs) -> bytes:
 
 
 def request(*args, **kwargs) -> Tuple[bytes, str]:
+    """Make a Request, a message that will yield a Response.
+
+    Contains ALL fields documented in `notif` above, PLUS:
+        "id": Newly-generated UUID of the Request, for replication in Response.
+    """
     req = _make(*args, **kwargs)
-    mid = id_new()
+    mid = _id_new()
     req["id"] = mid
 
     return json.dumps(
@@ -63,8 +85,18 @@ def request(*args, **kwargs) -> Tuple[bytes, str]:
     ).encode("utf-8"), mid
 
 
-def response(mid: int, res=None, err: dict = None):
-    resp = {"jsonrpc": "2.0"}
+def response(mid: int, res=None, err: dict = None) -> bytes:
+    """Make a Response, to be sent in reply to a Request.
+
+    Contains:
+        "jsonrpc" (str): Protocol specifier, must be "2.0".
+        Exactly ONE of:
+            "result" (any): Whatever data should be sent back.
+            "error" (dict): A Dict built by `error()`, contains data about what
+                went wrong.
+        "id": The UUID of the Request that prompted this Response.
+    """
+    resp = {"jsonrpc": __version__}
     if err:
         resp["error"] = err
     else:
