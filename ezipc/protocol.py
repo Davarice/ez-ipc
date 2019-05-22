@@ -37,6 +37,10 @@ def _id_new() -> str:
     return uuid4().hex
 
 
+def check_version(v: str):
+    return v == __version__
+
+
 class Errors:
     """Constructor for custom Error objects and shortcuts for pre-defined
         errors, as listed in section 5.1 of the JSON-RPC specification.
