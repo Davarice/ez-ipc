@@ -13,17 +13,9 @@ class Server:
 
         self.addr = addr
         self.port = port
-        self.loop = None
-        self.remotes = set()
-        self.running = None
-        self.startup = None
 
-    def attach(self, loop=None):
-        """Attach to an Event Loop."""
-        self.loop = loop or asyncio.get_event_loop()
-        self.startup = asyncio.start_server(
-            self.accept_connection, self.addr, self.port, loop=self.loop
-        )
+        self.remotes = set()
+        self.server = None
 
     def _setup(self, *a, **kw):
         """Execute all prerequisites to running, before running. Meant to be
@@ -31,42 +23,41 @@ class Server:
         """
         pass
 
-    def run(self, *a, **kw):
-        """Execute final Setup, and then run the Server."""
-        if not self.loop:
-            return
+    async def open_connection(
+        self, str_in: asyncio.StreamReader, str_out: asyncio.StreamWriter
+    ):
+        """Callback executed by AsyncIO when a Client contacts the Server."""
+        print(
+            "Incoming Connection from Client at `{}`.".format(
+                str_out.get_extra_info("peername", "Unknown Address")
+            )
+        )
+        con = Tunnel(str_in, str_out)
+        self.remotes.add(con)
+        await asyncio.create_task(con.loop())
 
+    async def run(self, *a, **kw):
+        """Execute final Setup, and then run the Server."""
         self._setup(*a, **kw)
-        self.running = self.loop.run_until_complete(self.startup)
 
         try:
-            print("Running Server...")
-            self.loop.run_forever()
+            print("Running Server on {}:{}".format(self.addr, self.port))
+            self.server = await asyncio.start_server(
+                self.open_connection, self.addr, self.port
+            )
+            await self.server.serve_forever()
         except KeyboardInterrupt:
             print("INTERRUPTED. Server closing...")
         else:
             print("Server closing...")
         finally:
-            self.kill()
+            await self.kill()
 
-    def kill(self):
-        if self.running:
-            self.running.close()
-            self.loop.run_until_complete(self.running.wait_closed())
-            self.running = None
-        self.loop.close()
+    async def kill(self):
+        if self.server.is_serving():
+            self.server.close()
+            await self.server.wait_closed()
         print("Server closed.")
 
-    async def accept_connection(
-        self, str_in: asyncio.StreamReader, str_out: asyncio.StreamWriter
-    ):
-        """Callback executed by AsyncIO when a Client contacts the Server."""
-        print("Incoming Connection from Client at `{}`.".format(str_out.get_extra_info("peername", "Unknown Address")))
-        con = Tunnel(str_in, str_out)
-        self.remotes.add(con)
-        await asyncio.create_task(con.loop())
 
-
-z = Server()
-z.attach()
-z.run()
+asyncio.run(Server().run())

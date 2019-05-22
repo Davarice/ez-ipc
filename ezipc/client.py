@@ -9,10 +9,15 @@ class Client:
         self.port = port
         self.con = None
 
+    def _setup(self, *a, **kw):
+        """Execute all prerequisites to running, before running. Meant to be
+            overwritten by Subclasses.
+        """
+        pass
+
     async def connect(self):
-        self.con = Tunnel(*(await asyncio.open_connection(
-            self.addr, self.port
-        )))
+        streams = await asyncio.open_connection(self.addr, self.port)
+        self.con = Tunnel(*streams)
 
     async def execute(self):
         """Core execution method, should return usable Stream objects.
@@ -34,7 +39,7 @@ class Client:
         print("Received Server response: {}".format(repr(data)))
 
     async def run(self, *a, **kw):
-        self.setup(*a, **kw)
+        self._setup(*a, **kw)
 
         try:
             print("Running Client...")
@@ -47,12 +52,6 @@ class Client:
             print("Client closing...")
         finally:
             print("Client closed.")
-
-    def setup(self, *a, **kw):
-        """Execute all prerequisites to running, before running. Meant to be
-            overwritten by Subclasses.
-        """
-        pass
 
 
 asyncio.run(Client().run())
