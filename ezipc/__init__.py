@@ -4,13 +4,6 @@ import asyncio
 def client_test():
     from .client import Client
 
-    async def receive(data, conn):
-        """Response handling Coroutine. Assigned to wait for a Response with a
-            certain UUID, and called by the Listener when a Response with that
-            UUID is received.
-        """
-        print("Received Server response from {}: {}".format(conn.id, repr(data)))
-
     async def go(_client):
         """One of the "main" Coroutines provided to `run_through()`. After the
             Client finishes its setup, it will call all Coroutines passed to
@@ -18,6 +11,13 @@ def client_test():
             receives the Client and can operate it. Any Exceptions raised here
             will be caught by `run_through()`.
         """
+        async def receive(data, conn):
+            """Response handler Coroutine. Assigned to wait for a Response with
+                a certain UUID, and called by the Listener when a Response with
+                that UUID is received.
+            """
+            print("Received Server response from {}: {}".format(conn.id, repr(data)))
+
         print("Sending Requests...")
 
         for i in ["aaaa", "zxcv", "qwert"]:
