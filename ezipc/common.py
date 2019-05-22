@@ -55,7 +55,7 @@ class Tunnel:
                 # Something is waiting for this message.
                 func = self.need_response[mid]
                 del self.need_response[mid]
-                self.active.append(await asyncio.create_task(func(data)))
+                self.active.append(await asyncio.create_task(func(data, self)))
             else:
                 # Nothing is waiting for this message...Save it anyway.
                 self.unhandled[mid] = data
@@ -68,7 +68,7 @@ class Tunnel:
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
-                self.active.append(await asyncio.create_task(func(data)))
+                self.active.append(await asyncio.create_task(func(data, self)))
             else:
                 # We have no hook for this method; Return an Error.
                 await self.send(
@@ -91,7 +91,7 @@ class Tunnel:
             elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
-                self.active.append(await asyncio.create_task(func(data)))
+                self.active.append(await asyncio.create_task(func(data, self)))
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.

@@ -17,11 +17,26 @@ class Server:
         self.clients = set()
         self.server = None
 
+        self.hooks_notif = {}
+        self.hooks_request = {}
+
     def _setup(self, *a, **kw):
         """Execute all prerequisites to running, before running. Meant to be
             overwritten by Subclasses.
         """
         pass
+
+    def hook_notif(self, method: str, func):
+        """Signal to the Tunnel that `func` is waiting for Notifications of the
+            provided `method` value.
+        """
+        self.hooks_notif[method] = func
+
+    def hook_request(self, method: str, func):
+        """Signal to the Tunnel that `func` is waiting for Requests of the
+            provided `method` value.
+        """
+        self.hooks_request[method] = func
 
     async def kill(self):
         for client in self.clients:
@@ -41,6 +56,12 @@ class Server:
             )
         )
         client = Tunnel(str_in, str_out)
+
+        # Replace the Client Hooks with our own. Since these are Mutable, this
+        #   keeps them consistent across all Clients.
+        client.hooks_notif = self.hooks_notif
+        client.hooks_request = self.hooks_request
+
         self.clients.add(client)
         print("Client at {} has been assigned UUID {}.".format(client.host, client.id))
         await client.loop()
