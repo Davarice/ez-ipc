@@ -1,24 +1,77 @@
+"""Module providing interfaces for creation and reception of communications.
+
+A (loose) implementation of the JSON-RPC 2.0 protocol.
+https://www.jsonrpc.org/specification
+"""
+
 import json
+from typing import Tuple
+from uuid import uuid4
 
 
-end = b"END\n"
-end_ack = b"END_ACK\n"
-
-head_json = b"JSON::"
+JSON_OPTS = {"separators": (",", ":")}
 
 
-JSON_OPTS = {
-    "separators": (",", ":")
-}
+def _make(meth: str, *args, **kwargs) -> dict:
+    if args and kwargs:
+        raise ValueError("JSONRPC request must be either positional OR keywords.")
+    elif args:
+        params = list(args)
+    elif kwargs:
+        params = {**kwargs}
+    else:
+        params = None
+
+    return {
+            "jsonrpc": "2.0",
+            "method": meth,
+            "params": params,
+        } if params else {
+            "jsonrpc": "2.0",
+            "method": meth,
+        }
 
 
-def decode(dat: bytes):
-    return json.loads(dat[len(head_json):-1].decode("utf-8"), **JSON_OPTS)
+def id_new():
+    return uuid4().hex
 
 
-def encode(obj):
-    return head_json + json.dumps(obj, **JSON_OPTS).encode("utf-8") + b"\n"
+def error(code: int, message: str, data=None) -> dict:
+    err = {"code": code, "message": message}
+    if data is not None:
+        err["data"] = data
+    return err
 
 
-def is_json(dat: bytes):
-    return dat[:len(head_json)] == head_json
+def notif(*args, **kwargs) -> bytes:
+    req = _make(*args, **kwargs)
+
+    return json.dumps(
+        req,
+        **JSON_OPTS
+    ).encode("utf-8")
+
+
+def request(*args, **kwargs) -> Tuple[bytes, str]:
+    req = _make(*args, **kwargs)
+    mid = id_new()
+    req["id"] = mid
+
+    return json.dumps(
+        req,
+        **JSON_OPTS
+    ).encode("utf-8"), mid
+
+
+def response(mid: int, res=None, err: dict = None):
+    resp = {"jsonrpc": "2.0"}
+    if err:
+        resp["error"] = err
+    else:
+        resp["result"] = res
+    resp["id"] = mid
+
+    return json.dumps(
+        resp,
+        **JSON_OPTS
+    ).encode("utf-8")
