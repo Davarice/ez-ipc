@@ -80,6 +80,18 @@ class Tunnel:
                 func = self.hooks_notif[data["method"]]
                 self.active.append(await asyncio.create_task(func(data)))
 
+    def hook_notif(self, method: str, func):
+        """Signal to the Tunnel that `func` is waiting for Notifications of the
+            provided `method` value.
+        """
+        self.hooks_notif[method] = func
+
+    def hook_request(self, method: str, func):
+        """Signal to the Tunnel that `func` is waiting for Requests of the
+            provided `method` value.
+        """
+        self.hooks_request[method] = func
+
     def hook_response(self, uuid: str, func):
         """Signal to the Tunnel that `func` is waiting for a Response with an ID
             field of `uuid`.
