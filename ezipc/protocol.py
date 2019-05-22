@@ -134,3 +134,7 @@ def response(mid: int, res=None, err: dict = None) -> bytes:
         resp,
         **JSON_OPTS
     ).encode("utf-8")
+
+
+def unpack(data: bytes) -> dict:
+    return json.loads(data, **JSON_OPTS)
