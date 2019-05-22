@@ -28,6 +28,10 @@ class Client:
             self.loop.close()
             print("Client closed.")
 
+    async def send(self, data: bytes):
+        self.str_out.write(data if data[-1] == 10 else data + b"\n")
+        await self.str_out.drain()
+
     async def execute(self):
         """Core execution method, should return usable Stream objects.
             Example/test method, meant to be overwritten by Subclasses.
@@ -40,8 +44,7 @@ class Client:
         for i in ["aaaa", "zxcv", "END"]:
             await asyncio.sleep(3)
             print("Sending...")
-            self.str_out.write((str(i) + "\n").encode("utf-8"))
-            await self.str_out.drain()
+            await self.send((str(i)).encode("utf-8"))
             print("Sent.")
             print("Reading...")
             line: bytes = await self.str_in.readline()
