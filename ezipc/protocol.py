@@ -37,18 +37,45 @@ def _id_new() -> str:
     return uuid4().hex
 
 
-def error(code: int, message: str, data=None) -> dict:
-    """Make an Error, to be sent in a Response to a failed Request.
-
-    Contains:
-        "code" (int): The identifier of the error type.
-        "message" (str): Short description of the error.
-        ["data"] (any): A value containing further information.
+class Errors:
+    """Constructor for custom Error objects and shortcuts for pre-defined
+        errors, as listed in section 5.1 of the JSON-RPC specification.
     """
-    err = {"code": code, "message": message}
-    if data is not None:
-        err["data"] = data
-    return err
+
+    @staticmethod
+    def new(code: int, message: str, data=None) -> dict:
+        """Make an Error, to be sent in a Response to a failed Request.
+
+        Contains:
+            "code" (int): The identifier of the error type.
+            "message" (str): Short description of the error.
+            ["data"] (any): A value containing further information.
+        """
+        err = {"code": code, "message": message}
+        if data is not None:
+            err["data"] = data
+        return err
+
+    @classmethod
+    def parse_error(cls, data=None) -> dict:
+        return cls.new(-32700, "Parse error", data)
+
+    @classmethod
+    def invalid_request(cls, data=None) -> dict:
+        return cls.new(-32600, "Invalid Request", data)
+
+    @classmethod
+    def method_not_found(cls, data=None) -> dict:
+        return cls.new(-32601, "Method not found", data)
+
+    @classmethod
+    def invalid_params(cls, data=None) -> dict:
+        return cls.new(-32602, "Invalid params", data)
+
+    @classmethod
+    def server_error(cls, data=None) -> dict:
+        return cls.new(-32603, "Internal error", data)
+
 
 
 def notif(*args, **kwargs) -> bytes:
@@ -92,8 +119,8 @@ def response(mid: int, res=None, err: dict = None) -> bytes:
         "jsonrpc" (str): Protocol specifier, must be "2.0".
         Exactly ONE of:
             "result" (any): Whatever data should be sent back.
-            "error" (dict): A Dict built by `error()`, contains data about what
-                went wrong.
+            "error" (dict): A Dict built by `Errors.new()`, contains data about
+                what went wrong.
         "id": The UUID of the Request that prompted this Response.
     """
     resp = {"jsonrpc": __version__}
