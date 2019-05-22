@@ -81,7 +81,6 @@ class Errors:
         return cls.new(-32603, "Internal error", data)
 
 
-
 def notif(*args, **kwargs) -> bytes:
     """Make a Notification, to be sent without expectation of a Response.
 
@@ -141,4 +140,4 @@ def response(mid: int, res=None, err: dict = None) -> bytes:
 
 
 def unpack(data: bytes) -> dict:
-    return json.loads(data, **JSON_OPTS)
+    return json.loads(data)
