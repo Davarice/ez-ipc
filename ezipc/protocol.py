@@ -23,14 +23,11 @@ def _make(meth: str, *args, **kwargs) -> dict:
     else:
         params = None
 
-    return {
-            "jsonrpc": __version__,
-            "method": meth,
-            "params": params,
-        } if params else {
-            "jsonrpc": __version__,
-            "method": meth,
-        }
+    return (
+        {"jsonrpc": __version__, "method": meth, "params": params}
+        if params
+        else {"jsonrpc": __version__, "method": meth}
+    )
 
 
 def _id_new() -> str:
@@ -93,10 +90,7 @@ def notif(*args, **kwargs) -> bytes:
     """
     req = _make(*args, **kwargs)
 
-    return json.dumps(
-        req,
-        **JSON_OPTS
-    ).encode("utf-8")
+    return json.dumps(req, **JSON_OPTS).encode("utf-8")
 
 
 def request(*args, **kwargs) -> Tuple[bytes, str]:
@@ -109,10 +103,7 @@ def request(*args, **kwargs) -> Tuple[bytes, str]:
     mid = _id_new()
     req["id"] = mid
 
-    return json.dumps(
-        req,
-        **JSON_OPTS
-    ).encode("utf-8"), mid
+    return json.dumps(req, **JSON_OPTS).encode("utf-8"), mid
 
 
 def response(mid: int, res=None, err: dict = None) -> bytes:
@@ -133,11 +124,29 @@ def response(mid: int, res=None, err: dict = None) -> bytes:
         resp["result"] = res
     resp["id"] = mid
 
-    return json.dumps(
-        resp,
-        **JSON_OPTS
-    ).encode("utf-8")
+    return json.dumps(resp, **JSON_OPTS).encode("utf-8")
 
 
 def unpack(data: bytes) -> dict:
     return json.loads(data)
+
+
+def verify_notif(keys: list, data: dict) -> bool:
+    return data.get("jsonrpc", "") == __version__ and (
+            keys == ["jsonrpc", "method", "params"]
+            or keys == ["jsonrpc", "method"]
+    )
+
+
+def verify_request(keys: list, data: dict) -> bool:
+    return data.get("jsonrpc", "") == __version__ and (
+            keys == ["jsonrpc", "method", "params", "id"]
+            or keys == ["jsonrpc", "method", "id"]
+    )
+
+
+def verify_response(keys: list, data: dict) -> bool:
+    return data.get("jsonrpc", "") == __version__ and (
+            keys == ["jsonrpc", "result", "id"]
+            or keys == ["jsonrpc", "error", "id"]
+    )

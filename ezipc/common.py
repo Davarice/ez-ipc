@@ -2,10 +2,11 @@
 
 import asyncio
 from datetime import datetime as dt
-from . import protocol
+from json import JSONDecodeError
 from typing import Tuple
 from uuid import UUID, uuid4
 
+from . import protocol
 from .etc import nextline
 
 
@@ -33,10 +34,20 @@ class Tunnel:
         return "{}:{}".format(self.addr, self.port)
 
     async def get_data(self):
-        data = protocol.unpack(await nextline(self.instr))
+        try:
+            data = protocol.unpack(await nextline(self.instr))
+        except JSONDecodeError as e:
+            print("Invalid JSON received from Remote {}".format(self.id))
+            await self.send(
+                protocol.response(0, err=protocol.Errors.parse_error(str(e)))
+            )
+            return
+
         await asyncio.sleep(0.2)  # Allow a moment to finalize.
 
-        if "error" in data or "result" in data:
+        keys = list(data.keys())
+        # if "error" in data or "result" in data:
+        if protocol.verify_response(keys, data):
             # Message is a RESPONSE.
             print("Received a Response from Remote {}".format(self.id))
             mid = data["id"]
@@ -48,7 +59,8 @@ class Tunnel:
             else:
                 # Nothing is waiting for this message...Save it anyway.
                 self.unhandled[mid] = data
-        elif "id" in data:
+        # elif "id" in data:
+        elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
             print(
                 "Received a '{}' Request from Remote {}".format(data["method"], self.id)
@@ -65,7 +77,8 @@ class Tunnel:
                         err=protocol.Errors.method_not_found(data.get("method")),
                     )
                 )
-        else:
+        # else:
+        elif protocol.verify_notif(keys, data):
             # Message is a NOTIFICATION.
             print(
                 "Received a '{}' Notification from Remote {}".format(
@@ -79,6 +92,16 @@ class Tunnel:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
                 self.active.append(await asyncio.create_task(func(data)))
+        else:
+            # Message is not a valid JSON-RPC structure. If we can find an ID,
+            #   send a Response containing an Error and a frowny face.
+            print("Received an invalid Request from Remote {}".format(self.id))
+            if "id" in data:
+                await self.send(
+                    protocol.response(
+                        data["id"], err=protocol.Errors.invalid_request(list(data.keys()))
+                    )
+                )
 
     def hook_notif(self, method: str, func):
         """Signal to the Tunnel that `func` is waiting for Notifications of the
@@ -109,7 +132,7 @@ class Tunnel:
         if self.outstr.can_write_eof():
             # Send an EOF, if possible.
             self.outstr.write_eof()
-            await self.outstr.drain()
+            # await self.outstr.drain()
         # Finally, close the Stream.
         self.outstr.close()
 
