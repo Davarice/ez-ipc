@@ -1,9 +1,11 @@
 import asyncio
 
 
-async def nextline(r: asyncio.StreamReader, until="\n"):
-    line: bytes = await r.readline()
-    if line[-1] != ord(until):
+async def nextline(r: asyncio.StreamReader, until=b"\n"):
+    line: bytes = await r.readuntil(until)
+    if line == b"":
+        raise ConnectionResetError("Stream closed by remote host.")
+    elif line[-1] != ord(until):
         raise EOFError("Line ended early.")
     else:
         return line

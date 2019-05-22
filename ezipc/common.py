@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime as dt
 from . import protocol
 from typing import Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from .etc import nextline
 
@@ -15,7 +15,7 @@ class Tunnel:
         self.outstr = outstr
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
-        self.active = []  # TODO: Give Tunnel its own EventLoop.
+        self.active = []
         self.hooks_notif = {}  # {"method": function()}
         self.hooks_request = {}  # {"method": function()}
 
@@ -23,20 +23,22 @@ class Tunnel:
         self.unhandled = {}  # {"uuid": {data}}
 
         self.group = group
+        self.id = hex(
+            (uuid4().int + self.port + sum([int(s) for s in self.addr.split(".")]))
+            % 16 ** 5
+        )[2:]
 
     @property
     def host(self):
-        return ":".join((self.addr, str(self.port)))
+        return "{}:{}".format(self.addr, self.port)
 
     async def get_data(self):
-        try:
-            data = protocol.unpack(await nextline(self.instr))
-        except IndexError:
-            raise ConnectionResetError("Stream Ended.")
+        data = protocol.unpack(await nextline(self.instr))
         await asyncio.sleep(0.2)  # Allow a moment to finalize.
 
         if "error" in data or "result" in data:
             # Message is a RESPONSE.
+            print("Received a Response from Remote {}".format(self.id))
             mid = data["id"]
             if mid in self.need_response:
                 # Something is waiting for this message.
@@ -48,6 +50,9 @@ class Tunnel:
                 self.unhandled[mid] = data
         elif "id" in data:
             # Message is a REQUEST.
+            print(
+                "Received a '{}' Request from Remote {}".format(data["method"], self.id)
+            )
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
@@ -62,7 +67,15 @@ class Tunnel:
                 )
         else:
             # Message is a NOTIFICATION.
-            if data["method"] in self.hooks_notif:
+            print(
+                "Received a '{}' Notification from Remote {}".format(
+                    data["method"], self.id
+                )
+            )
+            if data["method"] == "TERM":
+                # The connection is being explicitly terminated.
+                raise ConnectionResetError("Connection terminated by peer.")
+            elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
                 self.active.append(await asyncio.create_task(func(data)))
@@ -73,23 +86,33 @@ class Tunnel:
         """
         self.need_response[uuid] = func
 
-    def kill(self):
-        self.outstr.close()
+    async def kill(self):
+        for coro in self.active:
+            # Cancel all running Tasks.
+            if coro:
+                coro.cancel()
         if self.group is not None and self in self.group:
+            # Remove self from Client Set, if possible.
             self.group.remove(self)
+        if self.outstr.can_write_eof():
+            # Send an EOF, if possible.
+            self.outstr.write_eof()
+            await self.outstr.drain()
+        # Finally, close the Stream.
+        self.outstr.close()
 
     async def loop(self):
         try:
             while True:
                 await self.get_data()
         except EOFError:
-            print("Connection with {} hit EOF.".format(self.host))
+            print("Connection with {} hit EOF.".format(self.id))
+            await self.kill()
         except ConnectionError as e:
-            print("Connection with {} closed: {}".format(self.host, e))
+            print("Connection with {} closed: {}".format(self.id, e))
+            await self.kill()
         except asyncio.CancelledError:
-            print("Connection with {} was cancelled.".format(self.host))
-        finally:
-            self.kill()
+            print("Listening to {} was cancelled.".format(self.id))
 
     async def notif(self, meth: str, params=None):
         """Assemble and send a JSON-RPC Notification with the given data."""

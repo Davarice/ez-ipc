@@ -25,7 +25,7 @@ class Server:
 
     async def kill(self):
         for client in self.clients:
-            client.kill()
+            await client.kill()
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
@@ -37,11 +37,12 @@ class Server:
         """Callback executed by AsyncIO when a Client contacts the Server."""
         print(
             "Incoming Connection from Client at `{}`.".format(
-                str_out.get_extra_info("peername", "Unknown Address")
+                str_out.get_extra_info("peername", ("Unknown Address", 0))[0]
             )
         )
         client = Tunnel(str_in, str_out)
         self.clients.add(client)
+        print("Client at {} has been assigned UUID {}.".format(client.host, client.id))
         await client.loop()
 
     async def run(self, loop=None):
@@ -68,7 +69,12 @@ class Server:
             asyncio.run(self.run())
         except KeyboardInterrupt:
             print("INTERRUPTED. Server closing...")
+        except Exception as e:
+            print("Server closing due to unexpected {}: {}".format(type(e).__name__, e))
         else:
             print("Server closing...")
         finally:
-            asyncio.run(self.kill())
+            try:
+                asyncio.run(self.kill())
+            except Exception:
+                return
