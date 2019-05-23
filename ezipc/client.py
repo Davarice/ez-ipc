@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime as dt
 
 from .common import Remote
+from .output import echo, err, P
 
 
 class Client:
@@ -18,8 +19,8 @@ class Client:
 
     async def _setup(self):
         async def cb_recv(data, conn):
-            print(
-                "    Received '{}' from Remote {}.".format(
+            echo("",
+                "Received '{}' from Remote {}.".format(
                     data.get("params", data["method"]), conn.id
                 )
             )
@@ -32,14 +33,15 @@ class Client:
             if ts:
                 self.startup = dt.fromtimestamp(ts)
                 conn.startup = self.startup
-            print("(i) Server Uptime: {}".format(dt.utcnow() - self.startup))
+                P.startup = self.startup
+            echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
 
         await self.remote.request("TIME", callback=cb_time)
 
     async def connect(self):
         streams = await asyncio.open_connection(self.addr, self.port)
         self.remote = Remote(*streams)
-        print(
+        echo("con",
             "Connected to Host. Server has been given the alias '{}'.".format(
                 self.remote.id
             )
@@ -66,15 +68,16 @@ class Client:
         try:
             asyncio.run(run())
         except ConnectionRefusedError:
-            print("Connection Refused.")
+            err("Connection Refused.")
         except ConnectionError as e:
-            print("{}: {}".format(type(e).__name__, e))
+            err("{}: {}".format(type(e).__name__, e))
         except KeyboardInterrupt:
-            print("INTERRUPTED. Client closing...")
+            err("INTERRUPTED. Client closing...")
+            # asyncio.run(self.remote.terminate("KeyboardInterrupt"))
         except Exception as e:
-            print("Client closing due to unexpected {}: {}".format(type(e).__name__, e))
+            err("Client closing due to unexpected {}: {}".format(type(e).__name__, e))
         else:
-            print("Done.")
+            echo("", "Done.")
         finally:
             try:
                 asyncio.run(self.remote.close())

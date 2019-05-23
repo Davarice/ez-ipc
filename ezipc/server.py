@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime as dt
 
 from .common import Remote
+from .output import echo, err
 
 
 class Server:
@@ -61,14 +62,19 @@ class Server:
 
         async def cb_broadcast(data, conn):
             if "result" in data:
-                print("    Broadcast received by Remote {}.".format(conn.id))
+                echo("tab", "Broadcast received by Remote {}.".format(conn.id))
 
-        for req in [
-            conn.request(meth, params, cb_broadcast)
+        for conn, req in [
+            (conn, conn.request(meth, params, cb_broadcast))
             for conn in self.remotes
             if not conn.outstr.is_closing()
         ]:
-            await req
+            try:
+                await req
+            except Exception:
+                err("Remote {} is not responding.".format(conn.id))
+                asyncio.ensure_future(req).cancel()
+                await conn.close()
 
     async def kill(self):
         for remote in self.remotes:
@@ -76,14 +82,14 @@ class Server:
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
-        print("Server closed.")
+        echo("", "Server closed.")
 
     async def open_connection(
         self, str_in: asyncio.StreamReader, str_out: asyncio.StreamWriter
     ):
         """Callback executed by AsyncIO when a Client contacts the Server."""
-        print(
-            " ++ Incoming Connection from Client at `{}`.".format(
+        echo("con",
+            "Incoming Connection from Client at `{}`.".format(
                 str_out.get_extra_info("peername", ("Unknown Address", 0))[0]
             )
         )
@@ -95,10 +101,14 @@ class Server:
         remote.hooks_request = self.hooks_request
         remote.startup = self.startup
 
+        for r_ in self.remotes.copy():
+            if not r_ or r_.outstr.is_closing():
+                self.remotes.remove(r_)
+
         self.remotes.add(remote)
         await self.broadcast("CENSUS", {"client_count": len(self.remotes)})
-        print(
-            " *  Client at {} has been assigned UUID {}.".format(remote.host, remote.id)
+        echo("edit",
+            "Client at {} has been assigned UUID {}.".format(remote.host, remote.id)
         )
         await remote.loop()
 
@@ -107,7 +117,7 @@ class Server:
             in instances where other things must be done, and the Server needs
             to be run properly asynchronously.
         """
-        print("Running Server on {}:{}".format(self.addr, self.port))
+        echo("", "Running Server on {}:{}".format(self.addr, self.port))
         self.server = await asyncio.start_server(
             self.open_connection,
             self.addr,
@@ -125,11 +135,11 @@ class Server:
         try:
             asyncio.run(self.run())
         except KeyboardInterrupt:
-            print("INTERRUPTED. Server closing...")
+            err("INTERRUPTED. Server closing...")
         except Exception as e:
-            print("Server closing due to unexpected {}: {}".format(type(e).__name__, e))
+            err("Server closing due to unexpected {}: {}".format(type(e).__name__, e))
         else:
-            print("Server closing...")
+            echo("", "Server closing...")
         finally:
             try:
                 asyncio.run(self.kill())

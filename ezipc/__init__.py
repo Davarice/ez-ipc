@@ -1,5 +1,7 @@
 import asyncio
 
+from .output import echo
+
 
 def client_test(addr=None):
     from .client import Client
@@ -16,9 +18,9 @@ def client_test(addr=None):
                 a certain UUID, and called by the Listener when a Response with
                 that UUID is received.
             """
-            print("    RESPONSE from {}: {}".format(conn.id, data.get("result") or data.get("error")))
+            echo("tab", "PONG from {}: {}".format(conn.id, data.get("result") or data.get("error")))
 
-        print("Sending Requests...")
+        echo("", "Sending Requests...")
 
         for i in ["aaaa", "zxcv", "qwert", "wysiwyg"]:
             await asyncio.sleep(1)

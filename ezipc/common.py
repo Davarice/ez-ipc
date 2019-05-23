@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from . import protocol
 from .etc import nextline
+from .output import echo, err as err_
 
 
 class Remote:
@@ -38,7 +39,7 @@ class Remote:
         try:
             data = protocol.unpack(await nextline(self.instr))
         except JSONDecodeError as e:
-            print("--> Invalid JSON received from Remote {}".format(self.id))
+            echo("recv", "Invalid JSON received from Remote {}".format(self.id))
             await self.send(
                 protocol.response("0", err=protocol.Errors.parse_error(str(e)))
             )
@@ -49,7 +50,7 @@ class Remote:
         keys = list(data.keys())
         if protocol.verify_response(keys, data):
             # Message is a RESPONSE.
-            print("--> Receiving a Response from Remote {}".format(self.id))
+            echo("recv", "Receiving a Response from Remote {}".format(self.id))
             mid = data["id"]
             if mid in self.need_response:
                 # Something is waiting for this message.
@@ -61,8 +62,8 @@ class Remote:
                 self.unhandled[mid] = data
         elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
-            print(
-                "--> Receiving a '{}' Request from Remote {}".format(data["method"], self.id)
+            echo("recv",
+                "Receiving a '{}' Request from Remote {}".format(data["method"], self.id)
             )
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
@@ -80,8 +81,8 @@ class Remote:
                 )
         elif protocol.verify_notif(keys, data):
             # Message is a NOTIFICATION.
-            print(
-                "--> Receiving a '{}' Notification from Remote {}".format(
+            echo("recv",
+                "Receiving a '{}' Notification from Remote {}".format(
                     data["method"], self.id
                 )
             )
@@ -95,7 +96,7 @@ class Remote:
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.
-            print("Received an invalid Request from Remote {}".format(self.id))
+            echo("", "Received an invalid Request from Remote {}".format(self.id))
             if "id" in data:
                 await self.send(
                     protocol.response(
@@ -130,7 +131,7 @@ class Remote:
         if self.group is not None and self in self.group:
             # Remove self from Client Set, if possible.
             self.group.remove(self)
-        if self.outstr.can_write_eof():
+        if self.outstr.can_write_eof() and not self.outstr.is_closing():
             # Send an EOF, if possible.
             self.outstr.write_eof()
             await self.outstr.drain()
@@ -141,18 +142,20 @@ class Remote:
         try:
             while True:
                 await self.get_data()
+        except asyncio.IncompleteReadError:
+            err_("Connection with {} cut off.".format(self.id))
         except EOFError:
-            print("X   Connection with {} hit EOF.".format(self.id))
+            err_("Connection with {} hit EOF.".format(self.id))
             await self.close()
         except ConnectionError as e:
-            print("X   Connection with {} closed: {}".format(self.id, e))
+            err_("Connection with {} closed: {}".format(self.id, e))
             await self.close()
         except asyncio.CancelledError:
-            print("Listening to {} was cancelled.".format(self.id))
+            err_("Listening to {} was cancelled.".format(self.id))
 
     async def notif(self, meth: str, params=None):
         """Assemble and send a JSON-RPC Notification with the given data."""
-        print("<-- Sending a '{}' Notification to Remote {}.".format(meth, self.id))
+        echo("send", "Sending a '{}' Notification to Remote {}.".format(meth, self.id))
         if type(params) == dict:
             await self.send(protocol.notif(meth, **params))
         elif type(params) == list:
@@ -165,7 +168,7 @@ class Remote:
             and return the UUID and timestamp of the message, so that we can
             find the Response.
         """
-        print("<-- Sending a '{}' Request to Remote {}.".format(meth, self.id))
+        echo("send", "Sending a '{}' Request to Remote {}.".format(meth, self.id))
         if type(params) == dict:
             data, mid = protocol.request(meth, **params)
         elif type(params) == list:
@@ -180,8 +183,8 @@ class Remote:
         return UUID(hex=mid), dt.utcnow()
 
     async def respond(self, mid: str, *, err=None, res=None):
-        print(
-            "<-- Sending a {} Response to Remote {}.".format(
+        echo("send",
+            "Sending a {} Response to Remote {}.".format(
                 "Failure" if err else "Success", self.id
             )
         )
@@ -194,6 +197,9 @@ class Remote:
             self.outstr.write(data if data[-1] == 10 else data + b"\n")
             await self.outstr.drain()
 
-    async def terminate(self):
-        await self.notif("TERM")
+    async def terminate(self, reason: str = None):
+        if reason:
+            await self.notif("TERM", {"reason": reason})
+        else:
+            await self.notif("TERM")
         await self.close()
