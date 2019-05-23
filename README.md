@@ -1,6 +1,9 @@
-[![Python 3.7](https://img.shields.io/badge/Python-3.7-blue.svg?logoColor=white&logo=python&style=popout)](https://www.python.org/)  
-[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/licenses/GPL-3.0)  
+[![Python 3.7](https://img.shields.io/badge/Python-3.7+-informational.svg?logoColor=white&logo=python&style=popout)](https://www.python.org/)
+
+![Developed on Arch](https://img.shields.io/badge/Built%20and%20Tested%20on-Arch%20Linux-informational.svg?logoColor=%231793D1&logo=arch-linux&style=popout)
+
 [![Codestyle: Black](https://img.shields.io/badge/Codestyle-Black-000000.svg)](https://github.com/ambv/black)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://opensource.org/licenses/GPL-3.0)
 
 # EZ-IPC
 
@@ -12,7 +15,7 @@ I dont know what Im doing.
 
 The goal of this Library is to simplify IPC, possibly networked, as much as possible. A Server instance of the program will listen for connections, accept connections from Client instances of the program, and then allow for the transfer of Python data via [JSON-RPC](https://www.jsonrpc.org/specification).
 
-As a developer with a long standing aversion to anything networking, I will be learning the basics while building this. I have no idea what limitations will be involved, but still I intend the Library to be as accessible, and also secure, as I can possibly make it.
+As a developer with a long standing aversion to application layer networking, I will be learning the basics while building this. I have no idea what limitations will be involved, but still I intend the Library to be as accessible, and also secure, as I can possibly make it.
 
 *\*Due to my inexperience, any and all data transferred by way of this Library should be considered compromised. Do not use it for anything sensitive.*
 
