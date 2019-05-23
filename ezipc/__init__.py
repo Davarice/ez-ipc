@@ -1,7 +1,7 @@
 import asyncio
 
 
-def client_test():
+def client_test(addr=None):
     from .client import Client
 
     async def go(_client):
@@ -25,28 +25,22 @@ def client_test():
             if not _client.alive:
                 return
 
-            # print("Sending...")
-            # Send a Ping Request to the Server.
-            uuid, ts = await _client.con.request("PING", [i])
-            # Then, take the received UUID and pass it through the Response Hook
-            #   of the Client Connection, specifying `receive()` as the Coro
-            #   that will handle the Response.
-            _client.con.hook_response(uuid.hex, receive)
-
-            # print("Request sent.")
+            # Send a Ping Request to the Server. Put the Callback in the final
+            #   slot so it gets registered automatically.
+            await _client.remote.request("PING", [i], receive)
 
         # After the final line of the final Coroutine, the Client will end. One
         #   should take care that time is allotted to handle any Responses that
         #   may still be en route.
         await asyncio.sleep(1)
 
-    Client().run_through(go)
+    (Client(addr) if addr else Client()).run_through(go)
     # `run_through()` may take any number of Coroutines as Arguments. They will
     #   be awaited, with the Client passed, sequentially.
 
 
-def server_test():
+def server_test(addr=None):
     from .server import Server
     # If the Server will do nothing other than listen, it requires no more than
     #   this single call.
-    Server().start()
+    (Server(addr) if addr else Server()).start()

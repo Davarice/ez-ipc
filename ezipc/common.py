@@ -10,7 +10,7 @@ from . import protocol
 from .etc import nextline
 
 
-class Tunnel:
+class Remote:
     def __init__(self, instr, outstr, group: set = None):
         self.instr = instr
         self.outstr = outstr
@@ -28,6 +28,7 @@ class Tunnel:
             (uuid4().int + self.port + sum([int(s) for s in self.addr.split(".")]))
             % 16 ** 5
         )[2:]
+        self.startup = dt.utcnow()
 
     @property
     def host(self):
@@ -46,7 +47,6 @@ class Tunnel:
         await asyncio.sleep(0.2)  # Allow a moment to finalize.
 
         keys = list(data.keys())
-        # if "error" in data or "result" in data:
         if protocol.verify_response(keys, data):
             # Message is a RESPONSE.
             print("--> Receiving a Response from Remote {}".format(self.id))
@@ -59,7 +59,6 @@ class Tunnel:
             else:
                 # Nothing is waiting for this message...Save it anyway.
                 self.unhandled[mid] = data
-        # elif "id" in data:
         elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
             print(
@@ -79,7 +78,6 @@ class Tunnel:
                         err=protocol.Errors.method_not_found(data.get("method")),
                     )
                 )
-        # else:
         elif protocol.verify_notif(keys, data):
             # Message is a NOTIFICATION.
             print(
@@ -107,19 +105,19 @@ class Tunnel:
                 )
 
     def hook_notif(self, method: str, func):
-        """Signal to the Tunnel that `func` is waiting for Notifications of the
+        """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
         """
         self.hooks_notif[method] = func
 
     def hook_request(self, method: str, func):
-        """Signal to the Tunnel that `func` is waiting for Requests of the
+        """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
         """
         self.hooks_request[method] = func
 
     def hook_response(self, uuid: str, func):
-        """Signal to the Tunnel that `func` is waiting for a Response with an ID
+        """Signal to the Remote that `func` is waiting for a Response with an ID
             field of `uuid`.
         """
         self.need_response[uuid] = func
@@ -135,7 +133,7 @@ class Tunnel:
         if self.outstr.can_write_eof():
             # Send an EOF, if possible.
             self.outstr.write_eof()
-            # await self.outstr.drain()
+            await self.outstr.drain()
         # Finally, close the Stream.
         self.outstr.close()
 
@@ -192,8 +190,9 @@ class Tunnel:
         )
 
     async def send(self, data: bytes):
-        self.outstr.write(data if data[-1] == 10 else data + b"\n")
-        await self.outstr.drain()
+        if not self.outstr.is_closing():
+            self.outstr.write(data if data[-1] == 10 else data + b"\n")
+            await self.outstr.drain()
 
     async def terminate(self):
         await self.notif("TERM")
