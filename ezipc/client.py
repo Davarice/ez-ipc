@@ -36,14 +36,24 @@ class Client:
             constructed Coroutine, while listening.
         """
 
+        async def recv(data, conn):
+            # print("Receiving")
+            print(
+                "    Received '{}' from Remote {}.".format(
+                    data.get("params", data["method"]), conn.id
+                )
+            )
+            await conn.respond(data["id"], res=[True])
+
         async def run():
             await self.connect()
+            self.con.hook_request("CENSUS", recv)
             self.listening = asyncio.create_task(self.con.loop())
 
             for coro in coros:
                 await coro(self)
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(60)
             self.listening.cancel()
             self.listening = None
 
@@ -59,6 +69,6 @@ class Client:
             print("Done.")
         finally:
             try:
-                asyncio.run(self.con.kill())
+                asyncio.run(self.con.close())
             except Exception:
                 return

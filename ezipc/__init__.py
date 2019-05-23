@@ -16,24 +16,24 @@ def client_test():
                 a certain UUID, and called by the Listener when a Response with
                 that UUID is received.
             """
-            print("Received Server response from {}: {}".format(conn.id, repr(data)))
+            print("    RESPONSE from {}: {}".format(conn.id, data.get("result") or data.get("error")))
 
         print("Sending Requests...")
 
-        for i in ["aaaa", "zxcv", "qwert"]:
+        for i in ["aaaa", "zxcv", "qwert", "wysiwyg"]:
             await asyncio.sleep(1)
             if not _client.alive:
                 return
 
-            print("Sending...")
+            # print("Sending...")
             # Send a Ping Request to the Server.
-            uuid, ts = await _client.con.request("ping", [i])
+            uuid, ts = await _client.con.request("PING", [i])
             # Then, take the received UUID and pass it through the Response Hook
             #   of the Client Connection, specifying `receive()` as the Coro
             #   that will handle the Response.
             _client.con.hook_response(uuid.hex, receive)
 
-            print("Request sent.")
+            # print("Request sent.")
 
         # After the final line of the final Coroutine, the Client will end. One
         #   should take care that time is allotted to handle any Responses that

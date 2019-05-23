@@ -37,9 +37,9 @@ class Tunnel:
         try:
             data = protocol.unpack(await nextline(self.instr))
         except JSONDecodeError as e:
-            print("Invalid JSON received from Remote {}".format(self.id))
+            print("--> Invalid JSON received from Remote {}".format(self.id))
             await self.send(
-                protocol.response(0, err=protocol.Errors.parse_error(str(e)))
+                protocol.response("0", err=protocol.Errors.parse_error(str(e)))
             )
             return
 
@@ -49,7 +49,7 @@ class Tunnel:
         # if "error" in data or "result" in data:
         if protocol.verify_response(keys, data):
             # Message is a RESPONSE.
-            print("Received a Response from Remote {}".format(self.id))
+            print("--> Receiving a Response from Remote {}".format(self.id))
             mid = data["id"]
             if mid in self.need_response:
                 # Something is waiting for this message.
@@ -63,12 +63,14 @@ class Tunnel:
         elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
             print(
-                "Received a '{}' Request from Remote {}".format(data["method"], self.id)
+                "--> Receiving a '{}' Request from Remote {}".format(data["method"], self.id)
             )
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
-                self.active.append(await asyncio.create_task(func(data, self)))
+                # await func(data, self)
+                tsk = await asyncio.create_task(func(data, self))
+                self.active.append(tsk)
             else:
                 # We have no hook for this method; Return an Error.
                 await self.send(
@@ -81,7 +83,7 @@ class Tunnel:
         elif protocol.verify_notif(keys, data):
             # Message is a NOTIFICATION.
             print(
-                "Received a '{}' Notification from Remote {}".format(
+                "--> Receiving a '{}' Notification from Remote {}".format(
                     data["method"], self.id
                 )
             )
@@ -99,7 +101,8 @@ class Tunnel:
             if "id" in data:
                 await self.send(
                     protocol.response(
-                        data["id"], err=protocol.Errors.invalid_request(list(data.keys()))
+                        data["id"],
+                        err=protocol.Errors.invalid_request(list(data.keys())),
                     )
                 )
 
@@ -121,7 +124,7 @@ class Tunnel:
         """
         self.need_response[uuid] = func
 
-    async def kill(self):
+    async def close(self):
         for coro in self.active:
             # Cancel all running Tasks.
             if coro:
@@ -141,16 +144,17 @@ class Tunnel:
             while True:
                 await self.get_data()
         except EOFError:
-            print("Connection with {} hit EOF.".format(self.id))
-            await self.kill()
+            print("X   Connection with {} hit EOF.".format(self.id))
+            await self.close()
         except ConnectionError as e:
-            print("Connection with {} closed: {}".format(self.id, e))
-            await self.kill()
+            print("X   Connection with {} closed: {}".format(self.id, e))
+            await self.close()
         except asyncio.CancelledError:
             print("Listening to {} was cancelled.".format(self.id))
 
     async def notif(self, meth: str, params=None):
         """Assemble and send a JSON-RPC Notification with the given data."""
+        print("<-- Sending a '{}' Notification to Remote {}.".format(meth, self.id))
         if type(params) == dict:
             await self.send(protocol.notif(meth, **params))
         elif type(params) == list:
@@ -158,11 +162,12 @@ class Tunnel:
         else:
             await self.send(protocol.notif(meth))
 
-    async def request(self, meth: str, params=None) -> Tuple[UUID, dt]:
+    async def request(self, meth: str, params=None, callback=None) -> Tuple[UUID, dt]:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return the UUID and timestamp of the message, so that we can
             find the Response.
         """
+        print("<-- Sending a '{}' Request to Remote {}.".format(meth, self.id))
         if type(params) == dict:
             data, mid = protocol.request(meth, **params)
         elif type(params) == list:
@@ -170,8 +175,26 @@ class Tunnel:
         else:
             data, mid = protocol.request(meth)
         await self.send(data)
+
+        if callback:
+            self.hook_response(mid, callback)
+
         return UUID(hex=mid), dt.utcnow()
+
+    async def respond(self, mid: str, *, err=None, res=None):
+        print(
+            "<-- Sending a {} Response to Remote {}.".format(
+                "Failure" if err else "Success", self.id
+            )
+        )
+        await self.send(
+            protocol.response(mid, err=err) if err else protocol.response(mid, res=res)
+        )
 
     async def send(self, data: bytes):
         self.outstr.write(data if data[-1] == 10 else data + b"\n")
         await self.outstr.drain()
+
+    async def terminate(self):
+        await self.notif("TERM")
+        await self.close()

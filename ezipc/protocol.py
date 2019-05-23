@@ -25,7 +25,7 @@ def _make(meth: str, *args, **kwargs) -> dict:
 
     return (
         {"jsonrpc": __version__, "method": meth, "params": params}
-        if params
+        if params is not None
         else {"jsonrpc": __version__, "method": meth}
     )
 
@@ -106,7 +106,7 @@ def request(*args, **kwargs) -> Tuple[bytes, str]:
     return json.dumps(req, **JSON_OPTS).encode("utf-8"), mid
 
 
-def response(mid: int, res=None, err: dict = None) -> bytes:
+def response(mid: str, res=None, err: dict = None) -> bytes:
     """Make a Response, to be sent in reply to a Request.
 
     Contains:
@@ -119,9 +119,16 @@ def response(mid: int, res=None, err: dict = None) -> bytes:
     """
     resp = {"jsonrpc": __version__}
     if err:
+        keys = list(err.keys())
+        if not verify_error(keys):
+            raise ValueError(
+                "Error must have keys 'code', 'message', and, optionally, 'data'."
+            )
         resp["error"] = err
-    else:
+    elif res:
         resp["result"] = res
+    else:
+        raise ValueError("Response MUST be provided either a Result or an Error.")
     resp["id"] = mid
 
     return json.dumps(resp, **JSON_OPTS).encode("utf-8")
@@ -131,22 +138,24 @@ def unpack(data: bytes) -> dict:
     return json.loads(data)
 
 
+def verify_error(keys: list) -> bool:
+    return keys == ["code", "message", "data"] or keys == ["code", "message"]
+
+
 def verify_notif(keys: list, data: dict) -> bool:
     return data.get("jsonrpc", "") == __version__ and (
-            keys == ["jsonrpc", "method", "params"]
-            or keys == ["jsonrpc", "method"]
+        keys == ["jsonrpc", "method", "params"] or keys == ["jsonrpc", "method"]
     )
 
 
 def verify_request(keys: list, data: dict) -> bool:
     return data.get("jsonrpc", "") == __version__ and (
-            keys == ["jsonrpc", "method", "params", "id"]
-            or keys == ["jsonrpc", "method", "id"]
+        keys == ["jsonrpc", "method", "params", "id"]
+        or keys == ["jsonrpc", "method", "id"]
     )
 
 
 def verify_response(keys: list, data: dict) -> bool:
     return data.get("jsonrpc", "") == __version__ and (
-            keys == ["jsonrpc", "result", "id"]
-            or keys == ["jsonrpc", "error", "id"]
+        keys == ["jsonrpc", "result", "id"] or keys == ["jsonrpc", "error", "id"]
     )
