@@ -172,11 +172,11 @@ class Remote:
         """
         self.hooks_request[method] = func
 
-    def hook_response(self, uuid: str, func):
-        """Signal to the Remote that `func` is waiting for a Response with an ID
+    def hook_response(self, uuid: str, future: asyncio.Future):
+        """Signal to the Remote that `future` is waiting for a Response with an ID
             field of `uuid`.
         """
-        self.futures[uuid] = func
+        self.futures[uuid] = future
 
     def close(self):
         for coro in self.tasks:

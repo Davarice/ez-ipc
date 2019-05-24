@@ -26,22 +26,27 @@ The Server instance is surprisingly simple, if it is not needed for any other as
 ```python
 from ezipc.server import Server
 
+
 serv = Server()  # Instantiate a Server.
 
-async def write_file(data, conn):
-    # Define a Coroutine that will be called with the relevant Request. The
-    #   Coroutine should take two Arguments:
+
+async def write_file(data, remote):
+    # Define a Coroutine that will be called with the relevant
+    #   Notification. The Coroutine should take two Arguments:
     #       `data` - A JSON-RPC Message, in the form of a Dict
-    #       `conn` - The Tunnel object that received the Message
-    print("Writing data received from Remote {} to file...".format(conn.id))
+    #       `remote` - The Remote object that received the Message
+    print("Writing data received from {} to file...".format(remote))
     try:
         with open(data["params"]["filename"], "w") as file:
             written = file.write(data["params"]["content"])
-    except (KeyError, ValueError):
-        # For a Request, the JSON-RPC protocol would dictate that a Response is
-        #   returned with an error code from here.
+    except (KeyError, OSError, ValueError):
+        # For a Request, the JSON-RPC protocol would dictate that a
+        #   Response is returned with an "error" field from here.
         print("Failed to write file.")
     else:
+        # For a Request, again the protocol dictates a Response would be
+        #   returned. For a successful Request, it would include a
+        #   "result" field.
         print("Written {} bytes to file.".format(written))
 
 
@@ -58,8 +63,10 @@ serv.start()
 
 And just like that, the Server is listening for Messages. However, this simplicity comes at a small cost: The `Server.start()` method calls `asyncio.run()`, which means that no other asynchronous code can be run on this thread.
 
-If you need the Server to run in the background while you do other things, you will need to use `await asyncio.create_event()` on the `Server.run()` Coroutine. This means you must manage your own Event Loop, which cuts down slightly on the EZ in EZ-IPC.
+If you need the Server to run in the background while you do other things, you will need to add the `Server.run()` Coroutine to an Event Loop. This means you must manage your own Event Loop, which cuts down slightly on the EZ in EZ-IPC.
 
 The Client instance is *somewhat* more complex, as it typically is not the party that gets to wait around. I think I have made it elegant enough, but in addition to defining Coroutines for what to send, if any Message you send is a Request, you must be prepared to deal with the Response.
 
-This requires you to define a second Coroutine, and then (inside your first Coroutine) read the Message UUID assigned to the Requests you send, and hook those UUIDs to your second Coroutine, the Response handler. If this is not clear, refer to the test method in `__init__.py` for an example.
+This requires you to either:
+1. Save the Future object returned by `Remote.request()`, and `await` it later. This will allow the same Coroutine to be "paused" until it has a Response.
+2. Define a second Function, and then (inside your first Coroutine) pass the Function into the `Remote.request()` Coroutine as a third argument, after the Method and Parameters. It will be called when a Response is received, with the Future from the Request passed as the first argument. The `partial()` function from `functools` can be used to pass in more arguments.
