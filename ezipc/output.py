@@ -36,6 +36,7 @@ class _Printer:
                         Fore.RESET,
                         " ",
                         str(text),
+                        Fore.RESET,
                     ]
                 )
             )
@@ -51,8 +52,10 @@ def echo(etype: str, text: str):
     P.emit(etype_, text, pri)
 
 
-def err(text: str):
-    echo("err", text)
+def err(text: str, exc: Exception = None):
+    if exc:
+        text += " {} - {}".format(type(exc).__name__, exc)
+    echo("err", Fore.RED + text)
 
 
 def set_verbosity(n: int):

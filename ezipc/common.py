@@ -3,8 +3,8 @@
 import asyncio
 from datetime import datetime as dt
 from json import JSONDecodeError
-from typing import Tuple
-from uuid import UUID, uuid4
+from typing import Tuple, Union
+from uuid import uuid4
 
 from . import protocol
 from .etc import nextline
@@ -65,8 +65,8 @@ class Remote:
                 self.unhandled[mid] = data
         elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
-            echo("recv",
-                "Receiving a '{}' Request from {}".format(data["method"], self)
+            echo(
+                "recv", "Receiving a '{}' Request from {}".format(data["method"], self)
             )
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
@@ -84,10 +84,9 @@ class Remote:
                 )
         elif protocol.verify_notif(keys, data):
             # Message is a NOTIFICATION.
-            echo("recv",
-                "Receiving a '{}' Notification from {}".format(
-                    data["method"], self
-                )
+            echo(
+                "recv",
+                "Receiving a '{}' Notification from {}".format(data["method"], self),
             )
             if data["method"] == "TERM":
                 # The connection is being explicitly terminated.
@@ -126,7 +125,7 @@ class Remote:
         """
         self.need_response[uuid] = func
 
-    async def close(self):
+    def close(self):
         for coro in self.active:
             # Cancel all running Tasks.
             if coro:
@@ -137,7 +136,6 @@ class Remote:
         if self.outstr.can_write_eof() and not self.outstr.is_closing():
             # Send an EOF, if possible.
             self.outstr.write_eof()
-            await self.outstr.drain()
         # Finally, close the Stream.
         self.outstr.close()
 
@@ -151,61 +149,88 @@ class Remote:
         except asyncio.IncompleteReadError:
             err_("Connection with {} cut off.".format(self))
         except EOFError:
-            err_("Connection with {} hit EOF.".format(self))
-            await self.close()
+            err_("Connection with {} failed: Stream ended.".format(self))
+            self.close()
         except ConnectionError as e:
-            err_("Connection with {} closed: {}".format(self, e))
-            await self.close()
+            err_("Connection with {} closed:".format(self), e)
+            self.close()
         except asyncio.CancelledError:
             err_("Listening to {} was cancelled.".format(self))
+        except Exception as e:
+            err_("Connection with {} failed:".format(self), e)
 
-    async def notif(self, meth: str, params=None):
+    async def notif(self, meth: str, params=None, nohandle=False):
         """Assemble and send a JSON-RPC Notification with the given data."""
-        echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
-        if type(params) == dict:
-            await self.send(protocol.notif(meth, **params))
-        elif type(params) == list:
-            await self.send(protocol.notif(meth, *params))
-        else:
-            await self.send(protocol.notif(meth))
+        try:
+            echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
+            if type(params) == dict:
+                await self.send(protocol.notif(meth, **params))
+            elif type(params) == list:
+                await self.send(protocol.notif(meth, *params))
+            else:
+                await self.send(protocol.notif(meth))
+        except Exception as e:
+            if nohandle:
+                raise e
+            err_("Failed to send Notification:", e)
 
-    async def request(self, meth: str, params=None, callback=None) -> Tuple[UUID, dt]:
+    async def request(
+        self, meth: str, params: Union[dict, list] = None, callback=None, nohandle=False
+    ) -> Tuple[str, dt]:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return the UUID and timestamp of the message, so that we can
             find the Response.
         """
         echo("send", "Sending a '{}' Request to {}.".format(meth, self))
+
         if type(params) == dict:
             data, mid = protocol.request(meth, **params)
         elif type(params) == list:
             data, mid = protocol.request(meth, *params)
         else:
             data, mid = protocol.request(meth)
-        await self.send(data)
 
         if callback:
             self.hook_response(mid, callback)
 
-        return UUID(hex=mid), dt.utcnow()
+        try:
+            await self.send(data)
+            return mid, dt.utcnow()
+        except Exception as e:
+            if nohandle:
+                raise e
+            err_("Failed to send Request:", e)
+            return mid, dt.utcnow()
 
-    async def respond(self, mid: str, *, err=None, res=None):
-        echo("send",
-            "Sending a {} Response to {}.".format(
-                "Failure" if err else "Success", self
+    async def respond(self, mid: str, *, err=None, res=None, nohandle=False):
+        echo(
+            "send",
+            "Sending {} to {}.".format(
+                "an Error Response" if err else "a Result Response", self
+            ),
+        )
+        try:
+            await self.send(
+                protocol.response(mid, err=err)
+                if err
+                else protocol.response(mid, res=res)
             )
-        )
-        await self.send(
-            protocol.response(mid, err=err) if err else protocol.response(mid, res=res)
-        )
+        except Exception as e:
+            if nohandle:
+                raise e
+            err_("Failed to send Response:", e)
 
     async def send(self, data: bytes):
-        if not self.outstr.is_closing():
-            self.outstr.write(data if data[-1] == 10 else data + b"\n")
-            await self.outstr.drain()
+        self.outstr.write(data if data[-1] == 10 else data + b"\n")
+        await self.outstr.drain()
 
     async def terminate(self, reason: str = None):
-        if reason:
-            await self.notif("TERM", {"reason": reason})
-        else:
-            await self.notif("TERM")
-        await self.close()
+        try:
+            if reason:
+                await self.notif("TERM", {"reason": reason}, nohandle=True)
+            else:
+                await self.notif("TERM", nohandle=True)
+        except Exception as e:
+            err_("Failed to send TERM:", e)
+        finally:
+            self.close()

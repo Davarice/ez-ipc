@@ -1,12 +1,13 @@
 import asyncio
+import time
 
 from .output import echo, set_verbosity
 
 
-def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=2):
+def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=2, CLIENTS=1):
     from .client import Client
 
-    async def go(_client):
+    async def send_pings(_client):
         """One of the "main" Coroutines provided to `run_through()`. After the
             Client finishes its setup, it will call all Coroutines passed to
             `run_through()` in sequence, passing itself in; Thus, this Coroutine
@@ -38,14 +39,25 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=2):
             await _client.remote.request("PING", [i], receive)
 
         # After the final line of the final Coroutine, the Client will end. One
-        #   should take care that time is allotted to handle any Responses that
-        #   may still be en route.
+        #   should take care that time is allotted to receive any Responses that
+        #   may still be en route, unless one can be sure they are unimportant.
         await asyncio.sleep(1)
 
     set_verbosity(verb)
-    Client(addr, port).run_through(go)
+    eventloop = asyncio.get_event_loop()
+
+    x = [
+        Client(addr, port).run_through(send_pings, loop=eventloop)
+        for _ in range(CLIENTS)
+    ]
     # `run_through()` may take any number of Coroutines as Arguments. They will
     #   be awaited, with the Client passed, sequentially.
+
+    try:
+        # asyncio.wait(asyncio.gather(*x))
+        eventloop.run_until_complete(asyncio.gather(*x))
+    except KeyboardInterrupt:
+        return
 
 
 def server_test(addr: str = "127.0.0.1", port: int = 9002, verb=2, auto=False):

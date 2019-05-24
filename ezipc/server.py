@@ -83,13 +83,17 @@ class Server:
                 err("{} is not responding.".format(conn))
                 try:
                     asyncio.ensure_future(req).cancel()
+                    await conn.close()
                 finally:
                     self.remotes.remove(conn)
-                    await conn.close()
+
+    def drop(self, remote):
+        pass
 
     async def kill(self):
         for remote in self.remotes:
             await remote.terminate()
+        self.remotes = []
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
@@ -112,9 +116,9 @@ class Server:
         remote.hooks_request = self.hooks_request
         remote.startup = self.startup
 
-        for r_ in self.remotes.copy():
-            if not r_ or r_.outstr.is_closing():
-                self.remotes.remove(r_)
+        # for r_ in self.remotes.copy():
+        #     if not r_ or r_.outstr.is_closing():
+        #         self.remotes.remove(r_)
 
         self.remotes.add(remote)
         await self.broadcast("CENSUS", {"client_count": len(self.remotes)})

@@ -27,7 +27,7 @@ class Client:
     def alive(self):
         return bool(self.remote and not self.remote.outstr.is_closing())
 
-    async def _setup(self):
+    async def _add_hooks(self):
         async def cb_recv(data, conn):
             echo("",
                 "Received '{}' from Remote {}.".format(
@@ -48,7 +48,7 @@ class Client:
 
         await self.remote.request("TIME", callback=cb_time)
 
-    async def connect(self):
+    async def connect(self, loop):
         streams = await asyncio.open_connection(self.addr, self.port)
         self.remote = Remote(*streams)
         echo("con",
@@ -56,40 +56,59 @@ class Client:
                 self.remote.id
             )
         )
-        await self._setup()
+        self.listening = loop.create_task(self.remote.loop())
+        await self._add_hooks()
 
-    def run_through(self, *coros):
+    async def disconnect(self):
+        if self.listening:
+            self.listening.cancel()
+            self.listening = None
+
+        if self.alive:
+            try:
+                await self.remote.close()
+            except Exception:
+                return
+
+    async def run_through(self, *coros, loop=None):
         """Construct a Coroutine that will sequentially run an arbitrary number
             of other Coroutines, passed to this method. Then, run the newly
             constructed Coroutine, while listening.
         """
+        loop = loop or asyncio.get_running_loop()
 
         async def run():
-            await self.connect()
-            self.listening = asyncio.create_task(self.remote.loop())
-
             for coro in coros:
                 await coro(self)
-
             await asyncio.sleep(60)
-            self.listening.cancel()
-            self.listening = None
 
         try:
-            asyncio.run(run())
+            await self.connect(loop)
+            await run()
         except ConnectionRefusedError:
             err("Connection Refused.")
         except ConnectionError as e:
-            err("{}: {}".format(type(e).__name__, e))
+            err("Connection Lost:", e)
+
+        except asyncio.CancelledError:
+            err("CANCELLED. Client closing...")
+            try:
+                await self.remote.terminate("Coroutine Cancelled")
+                echo("info", "Connection ended.")
+            except:
+                err("Closing immediately.")
+
         except KeyboardInterrupt:
             err("INTERRUPTED. Client closing...")
-            # asyncio.run(self.remote.terminate("KeyboardInterrupt"))
+            try:
+                await self.remote.terminate("KeyboardInterrupt")
+                echo("info", "Connection ended.")
+            except:
+                err("Closing immediately.")
+
         except Exception as e:
-            err("Client closing due to unexpected {}: {}".format(type(e).__name__, e))
+            err("Client closing due to unexpected", e)
         else:
             echo("", "Done.")
         finally:
-            try:
-                asyncio.run(self.remote.close())
-            except Exception:
-                return
+            await self.disconnect()
