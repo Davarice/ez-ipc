@@ -33,7 +33,7 @@ class Client:
     async def _add_hooks(self):
         response = await self.remote.request("TIME")
 
-        async def cb_recv(data, conn):
+        async def cb_census(data, conn):
             echo(
                 "info",
                 "Currently '{}' Client(s) connected to {}.".format(
@@ -42,7 +42,7 @@ class Client:
             )
             await conn.respond(data["id"], data["method"], res=[True])
 
-        self.remote.hook_request("CENSUS", cb_recv)
+        self.remote.hook_request("CENSUS", cb_census)
 
         # await self.remote.request("TIME", callback=cb_time)
         await response
@@ -106,7 +106,7 @@ class Client:
             err("CANCELLED. Client closing...")
             try:
                 await self.remote.terminate("Coroutine Cancelled")
-                echo("info", "Connection ended.")
+                echo("info", "Connection Terminated.")
             except:
                 err("Closing immediately.")
 
@@ -121,7 +121,7 @@ class Client:
         # except Exception as e:
         #     err("Client closing due to unexpected", e)
         else:
-            echo("", "Done.")
+            echo("win", "Done.")
             try:
                 await self.remote.terminate("Program Completed")
                 echo("info", "Connection ended.")

@@ -1,7 +1,7 @@
 import asyncio
 
-from .etc import callback
-from .output import echo, set_verbosity
+from .etc import future_callback
+from .output import echo, err, set_verbosity
 
 
 def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
@@ -15,16 +15,15 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
             will be caught by `run_through()`.
         """
 
-        @callback
-        async def receive(future, remote):
-            """Response handler Coroutine. Assigned to wait for a Response with
-                a certain UUID, and called by the Listener when a Response with
-                that UUID is received.
+        @future_callback
+        async def receive(result, remote):
+            """Response handler Coroutine. Assigned to a Future, and called by
+                it when a Response with that UUID is received.
             """
             echo(
                 "tab",
                 "PONG from {}: {}".format(
-                    remote, future.get("result") or future.result().get("error")
+                    remote, result.get("result") or result.get("error")
                 ),
             )
 
@@ -41,13 +40,17 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
             #   arg so that it will be called as soon as the Future is ready.
             pongs.append(await _client.remote.request("PING", [i], receive))
 
-        print(pongs)
+        # print(pongs)
 
         # After the final line of the final Coroutine, the Client will end. One
         #   should take care that time is allotted to receive any Responses that
         #   may still be en route, unless one can be sure they are unimportant.
         await asyncio.sleep(1)
-        await asyncio.gather(*pongs)
+        try:
+            await asyncio.gather(*pongs)
+            echo("info", "Successfuly ran {} Pings.".format(len(pongs)))
+        except Exception as e:
+            err("Failed to run Pings:", e)
 
     set_verbosity(verb)
     eventloop = asyncio.get_event_loop()

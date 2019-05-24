@@ -37,15 +37,6 @@ class Server:
             overwritten by Subclasses.
         """
 
-        async def cb_pong(data, conn: Remote):
-            await conn.respond(
-                data["id"], data["method"], res={"method": "PONG", "params": data["params"]}
-            ) if "params" in data else conn.respond(
-                data["id"], data["method"], res={"method": "PONG", "params": None}
-            )
-
-        self.hook_request("PING", cb_pong)
-
         async def cb_time(data, conn: Remote):
             await conn.respond(
                 data.get("id", "0"), res={"startup": self.startup.timestamp()}
@@ -73,20 +64,20 @@ class Server:
             if "result" in data:
                 echo("tab", "Broadcast received by {}.".format(remote))
 
-        for conn, req in [
+        for remote_, request in [
             (conn, conn.request(meth, params, cb_broadcast))
             for conn in self.remotes
             if not conn.outstr.is_closing()
         ]:
             try:
-                await req
+                await request
             except Exception:
-                err("{} is not responding.".format(conn))
+                err("{} is not responding.".format(remote_))
                 try:
-                    asyncio.ensure_future(req).cancel()
-                    await conn.close()
+                    asyncio.ensure_future(request).cancel()
+                    await remote_.close()
                 finally:
-                    self.remotes.remove(conn)
+                    self.remotes.remove(remote_)
 
     def drop(self, remote):
         pass
@@ -111,15 +102,10 @@ class Server:
         )
         remote = Remote(self.eventloop, str_in, str_out)
 
-        # Replace the Client Hooks with our own. Since these are Mutable, this
-        #   keeps them consistent across all Clients.
-        remote.hooks_notif = self.hooks_notif
-        remote.hooks_request = self.hooks_request
+        # Update the Client Hooks with our own.
+        remote.hooks_notif.update(self.hooks_notif)
+        remote.hooks_request.update(self.hooks_request)
         remote.startup = self.startup
-
-        # for r_ in self.remotes.copy():
-        #     if not r_ or r_.outstr.is_closing():
-        #         self.remotes.remove(r_)
 
         self.remotes.add(remote)
         await self.broadcast("CENSUS", {"client_count": len(self.remotes)})

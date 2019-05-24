@@ -19,21 +19,22 @@ class Remote:
         self.outstr = outstr
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
-        self.active = []
         self.hooks_notif = {}  # {"method": function()}
         self.hooks_request = {}  # {"method": function()}
 
-        self.futures = {}  # {"uuid": function()}
+        self.futures = {}  # {"uuid": asyncio.Future}
+        self.tasks = []
 
         self.group = group
         self.id = hex(
             (uuid4().int + self.port + sum([int(s) for s in self.addr.split(".")]))
-            % 16 ** 5
+            % 16 ** 3
         )[2:]
 
         now = dt.utcnow()
         self.opened = now
         self.startup = now
+        self._add_default_hooks()
 
     @property
     def host(self):
@@ -41,6 +42,16 @@ class Remote:
 
     def __str__(self):
         return "Remote " + self.id
+
+    def _add_default_hooks(self):
+        async def cb_ping(data, remote: Remote):
+            await remote.respond(
+                data["id"],
+                data["method"],
+                res={"method": "PONG", "params": data.get("params", None)},
+            )
+
+        self.hook_request("PING", cb_ping)
 
     async def get_line(self, until=b"\n"):
         line: bytes = await self.instr.readuntil(until)
@@ -87,8 +98,12 @@ class Remote:
                     # We need to fulfill this Future now.
                     if "error" in data:
                         # Server sent an Error Response. Forward it to the Future.
-                        eline = "Error {}: {}".format(data["error"]["code"], data["error"]["message"])
-                        e = RemoteError(eline, data["error"]["data"] if "data" in data["error"] else None, mid)
+                        e = RemoteError(
+                            data["error"]["code"],
+                            data["error"]["message"],
+                            data["error"]["data"] if "data" in data["error"] else None,
+                            mid,
+                        )
                         future.set_exception(e)
                     else:
                         # Server sent a Result Response. Give it to the Future.
@@ -106,8 +121,8 @@ class Remote:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
                 # await func(data, self)
-                tsk = asyncio.ensure_future(func(data, self))
-                self.active.append(tsk)
+                tsk = asyncio.create_task(func(data, self))
+                self.tasks.append(tsk)
             else:
                 # We have no hook for this method; Return an Error.
                 await self.send(
@@ -125,11 +140,13 @@ class Remote:
             )
             if data["method"] == "TERM":
                 # The connection is being explicitly terminated.
-                raise ConnectionResetError(data["params"]["reason"] or "Connection terminated by peer.")
+                raise ConnectionResetError(
+                    data["params"]["reason"] or "Connection terminated by peer."
+                )
             elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
-                self.active.append(asyncio.ensure_future(func(data, self)))
+                self.tasks.append(asyncio.ensure_future(func(data, self)))
 
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
@@ -162,7 +179,7 @@ class Remote:
         self.futures[uuid] = func
 
     def close(self):
-        for coro in self.active:
+        for coro in self.tasks:
             # Cancel all running Tasks.
             if coro:
                 coro.cancel()
@@ -179,8 +196,8 @@ class Remote:
         try:
             while True:
                 await self.process_line(await self.get_line())
-                tasks = asyncio.gather(*self.active)
-                self.active = []
+                tasks = asyncio.gather(*self.tasks)
+                self.tasks = []
                 await tasks
         except asyncio.IncompleteReadError:
             err_("Connection with {} cut off.".format(self))
@@ -206,9 +223,9 @@ class Remote:
             else:
                 await self.send(protocol.make_notif(meth))
         except Exception as e:
+            err_("Failed to send Notification:", e)
             if nohandle:
                 raise e
-            err_("Failed to send Notification:", e)
 
     async def request(
         self, meth: str, params: Union[dict, list] = None, callback=None, nohandle=False
@@ -236,19 +253,21 @@ class Remote:
         try:
             await self.send(data)
         except Exception as e:
+            err_("Failed to send Request:", e)
             if nohandle:
                 raise e
-            err_("Failed to send Request:", e)
         finally:
             return future
 
-    async def respond(self, mid: str, method=None, *, err=None, res=None, nohandle=False):
+    async def respond(
+        self, mid: str, method=None, *, err=None, res=None, nohandle=False
+    ):
         echo(
             "send",
             "Sending {}{} to {}.".format(
                 "an Error Response" if err else "a Result Response",
                 " for '{}'".format(method) if method else "",
-                self
+                self,
             ),
         )
         try:
@@ -258,9 +277,9 @@ class Remote:
                 else protocol.make_response(mid, res=res)
             )
         except Exception as e:
+            err_("Failed to send Response:", e)
             if nohandle:
                 raise e
-            err_("Failed to send Response:", e)
 
     async def send(self, data: bytes):
         self.outstr.write(data if data[-1] == 10 else data + b"\n")

@@ -1,10 +1,10 @@
 import asyncio
 
 
-def callback(coro):
+def future_callback(coro):
     """Prepare a given Coroutine to interpret a Future as its Result."""
-    async def callback_(future: asyncio.Future, *a, **kw):
+    async def callback(future: asyncio.Future, *a, **kw):
         if future.done():
             return coro(future.result(), *a, **kw)
 
-    return callback_
+    return callback
