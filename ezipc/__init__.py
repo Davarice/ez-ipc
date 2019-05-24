@@ -1,9 +1,9 @@
 import asyncio
 
-from .output import echo
+from .output import echo, set_verbosity
 
 
-def client_test(addr=None):
+def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=2):
     from .client import Client
 
     async def go(_client):
@@ -13,12 +13,18 @@ def client_test(addr=None):
             receives the Client and can operate it. Any Exceptions raised here
             will be caught by `run_through()`.
         """
+
         async def receive(data, conn):
             """Response handler Coroutine. Assigned to wait for a Response with
                 a certain UUID, and called by the Listener when a Response with
                 that UUID is received.
             """
-            echo("tab", "PONG from {}: {}".format(conn.id, data.get("result") or data.get("error")))
+            echo(
+                "tab",
+                "PONG from {}: {}".format(
+                    conn, data.get("result") or data.get("error")
+                ),
+            )
 
         echo("", "Sending Requests...")
 
@@ -36,13 +42,16 @@ def client_test(addr=None):
         #   may still be en route.
         await asyncio.sleep(1)
 
-    (Client(addr) if addr else Client()).run_through(go)
+    set_verbosity(verb)
+    Client(addr, port).run_through(go)
     # `run_through()` may take any number of Coroutines as Arguments. They will
     #   be awaited, with the Client passed, sequentially.
 
 
-def server_test(addr=None):
+def server_test(addr: str = "127.0.0.1", port: int = 9002, verb=2, auto=False):
     from .server import Server
+
+    set_verbosity(verb)
+    Server(addr, port, auto).start()
     # If the Server will do nothing other than listen, it requires no more than
     #   this single call.
-    (Server(addr) if addr else Server()).start()

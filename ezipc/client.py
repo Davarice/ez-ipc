@@ -6,6 +6,16 @@ from .output import echo, err, P
 
 
 class Client:
+    """The Client is the component of the Client/Server Model that connects to
+        a Server and sends it input. In certain cases the Client will also wait
+        for returned data from the Server, such as Responses to Requests sent by
+        the Client. Rarely, the Client may also be designed to accept data which
+        was not expressly requested, such as a live chat program.
+
+    As the more active component, the Client will often spend most of its time
+        sending Messages, or waiting for Responses.
+    """
+
     def __init__(self, addr: str = "127.0.0.1", port: int = 9002):
         self.addr = addr
         self.port = port

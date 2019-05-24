@@ -35,11 +35,14 @@ class Remote:
     def host(self):
         return "{}:{}".format(self.addr, self.port)
 
+    def __str__(self):
+        return "Remote " + self.id
+
     async def get_data(self):
         try:
             data = protocol.unpack(await nextline(self.instr))
         except JSONDecodeError as e:
-            echo("recv", "Invalid JSON received from Remote {}".format(self.id))
+            echo("recv", "Invalid JSON received from {}".format(self))
             await self.send(
                 protocol.response("0", err=protocol.Errors.parse_error(str(e)))
             )
@@ -50,26 +53,26 @@ class Remote:
         keys = list(data.keys())
         if protocol.verify_response(keys, data):
             # Message is a RESPONSE.
-            echo("recv", "Receiving a Response from Remote {}".format(self.id))
+            echo("recv", "Receiving a Response from {}".format(self))
             mid = data["id"]
             if mid in self.need_response:
                 # Something is waiting for this message.
                 func = self.need_response[mid]
                 del self.need_response[mid]
-                self.active.append(await asyncio.create_task(func(data, self)))
+                self.active.append(asyncio.ensure_future(func(data, self)))
             else:
                 # Nothing is waiting for this message...Save it anyway.
                 self.unhandled[mid] = data
         elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
             echo("recv",
-                "Receiving a '{}' Request from Remote {}".format(data["method"], self.id)
+                "Receiving a '{}' Request from {}".format(data["method"], self)
             )
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
                 # await func(data, self)
-                tsk = await asyncio.create_task(func(data, self))
+                tsk = asyncio.ensure_future(func(data, self))
                 self.active.append(tsk)
             else:
                 # We have no hook for this method; Return an Error.
@@ -82,8 +85,8 @@ class Remote:
         elif protocol.verify_notif(keys, data):
             # Message is a NOTIFICATION.
             echo("recv",
-                "Receiving a '{}' Notification from Remote {}".format(
-                    data["method"], self.id
+                "Receiving a '{}' Notification from {}".format(
+                    data["method"], self
                 )
             )
             if data["method"] == "TERM":
@@ -92,11 +95,11 @@ class Remote:
             elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
-                self.active.append(await asyncio.create_task(func(data, self)))
+                self.active.append(asyncio.ensure_future(func(data, self)))
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.
-            echo("", "Received an invalid Request from Remote {}".format(self.id))
+            echo("", "Received an invalid Request from {}".format(self))
             if "id" in data:
                 await self.send(
                     protocol.response(
@@ -142,20 +145,23 @@ class Remote:
         try:
             while True:
                 await self.get_data()
+                tasks = asyncio.gather(*self.active)
+                self.active = []
+                await tasks
         except asyncio.IncompleteReadError:
-            err_("Connection with {} cut off.".format(self.id))
+            err_("Connection with {} cut off.".format(self))
         except EOFError:
-            err_("Connection with {} hit EOF.".format(self.id))
+            err_("Connection with {} hit EOF.".format(self))
             await self.close()
         except ConnectionError as e:
-            err_("Connection with {} closed: {}".format(self.id, e))
+            err_("Connection with {} closed: {}".format(self, e))
             await self.close()
         except asyncio.CancelledError:
-            err_("Listening to {} was cancelled.".format(self.id))
+            err_("Listening to {} was cancelled.".format(self))
 
     async def notif(self, meth: str, params=None):
         """Assemble and send a JSON-RPC Notification with the given data."""
-        echo("send", "Sending a '{}' Notification to Remote {}.".format(meth, self.id))
+        echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
         if type(params) == dict:
             await self.send(protocol.notif(meth, **params))
         elif type(params) == list:
@@ -168,7 +174,7 @@ class Remote:
             and return the UUID and timestamp of the message, so that we can
             find the Response.
         """
-        echo("send", "Sending a '{}' Request to Remote {}.".format(meth, self.id))
+        echo("send", "Sending a '{}' Request to {}.".format(meth, self))
         if type(params) == dict:
             data, mid = protocol.request(meth, **params)
         elif type(params) == list:
@@ -184,8 +190,8 @@ class Remote:
 
     async def respond(self, mid: str, *, err=None, res=None):
         echo("send",
-            "Sending a {} Response to Remote {}.".format(
-                "Failure" if err else "Success", self.id
+            "Sending a {} Response to {}.".format(
+                "Failure" if err else "Success", self
             )
         )
         await self.send(

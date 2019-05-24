@@ -6,6 +6,14 @@ from .output import echo, err
 
 
 class Server:
+    """The Server is the component of the Client/Server Model that waits for
+        input from a Client, and then operates on it. The Server can interface
+        with multiple Clients at the same time, and may even facilitate
+        communications between two Clients.
+
+    As the more passive component, the Server will spend most of its time waiting.
+    """
+
     def __init__(self, addr: str = "", port: int = 9002, autopublish=False):
         if autopublish:
             # TODO: Find the network address of this machine.
@@ -60,9 +68,9 @@ class Server:
         if not self.remotes:
             return
 
-        async def cb_broadcast(data, conn):
+        async def cb_broadcast(data, remote):
             if "result" in data:
-                echo("tab", "Broadcast received by Remote {}.".format(conn.id))
+                echo("tab", "Broadcast received by {}.".format(remote))
 
         for conn, req in [
             (conn, conn.request(meth, params, cb_broadcast))
@@ -72,9 +80,12 @@ class Server:
             try:
                 await req
             except Exception:
-                err("Remote {} is not responding.".format(conn.id))
-                asyncio.ensure_future(req).cancel()
-                await conn.close()
+                err("{} is not responding.".format(conn))
+                try:
+                    asyncio.ensure_future(req).cancel()
+                finally:
+                    self.remotes.remove(conn)
+                    await conn.close()
 
     async def kill(self):
         for remote in self.remotes:

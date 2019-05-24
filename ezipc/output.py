@@ -5,20 +5,20 @@ from colorama import init, Fore
 
 init()
 prefices = {
-    "": ("", 4),
-    "con": (" ++", 4),
-    "dcon": ("-X ", 4),
-    "diff": ("*- ", 3),
-    "err": ("x!x", 3),
-    "info": ("(!)", 1),
-    "recv": ("-->", 2),
-    "send": ("<--", 2),
-    "tab": ("   ", 2),
+    "": ("", 1),
+    "con": (" ++", 1),
+    "dcon": ("-X ", 1),
+    "diff": ("*- ", 2),
+    "err": ("x!x", 2),
+    "info": ("(!)", 4),
+    "recv": ("-->", 3),
+    "send": ("<--", 3),
+    "tab": ("   ", 3),
 }
 
 
 class _Printer:
-    def __init__(self, verbosity=4):
+    def __init__(self, verbosity=2):
         self.verbosity = verbosity
         self.startup = dt.utcnow()
 
@@ -45,13 +45,15 @@ P = _Printer()
 
 
 def echo(etype: str, text: str):
-    # if not text:
-    #     text = str(etype)
-    #     etype = ""
-    etype_, pri = prefices.get(etype, ("    ", 4))
-    # print(text)
+    if not text:
+        P.emit("?? ", etype, 4)
+    etype_, pri = prefices.get(etype, ("?? ", 4))
     P.emit(etype_, text, pri)
 
 
 def err(text: str):
     echo("err", text)
+
+
+def set_verbosity(n: int):
+    P.verbosity = n
