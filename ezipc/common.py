@@ -2,17 +2,19 @@
 
 import asyncio
 from datetime import datetime as dt
+from functools import partial
 from json import JSONDecodeError
-from typing import Tuple, Union
+from typing import Union
 from uuid import uuid4
 
 from . import protocol
-from .etc import nextline
-from .output import echo, err as err_
+from .exc import RemoteError
+from .output import echo, err as err_, warn
 
 
 class Remote:
-    def __init__(self, instr, outstr, group: set = None):
+    def __init__(self, eventloop, instr, outstr, group: set = None):
+        self.eventloop: asyncio.AbstractEventLoop = eventloop
         self.instr = instr
         self.outstr = outstr
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
@@ -21,15 +23,17 @@ class Remote:
         self.hooks_notif = {}  # {"method": function()}
         self.hooks_request = {}  # {"method": function()}
 
-        self.need_response = {}  # {"uuid": function()}
-        self.unhandled = {}  # {"uuid": {data}}
+        self.futures = {}  # {"uuid": function()}
 
         self.group = group
         self.id = hex(
             (uuid4().int + self.port + sum([int(s) for s in self.addr.split(".")]))
             % 16 ** 5
         )[2:]
-        self.startup = dt.utcnow()
+
+        now = dt.utcnow()
+        self.opened = now
+        self.startup = now
 
     @property
     def host(self):
@@ -38,13 +42,22 @@ class Remote:
     def __str__(self):
         return "Remote " + self.id
 
-    async def get_data(self):
+    async def get_line(self, until=b"\n"):
+        line: bytes = await self.instr.readuntil(until)
+        if line == b"":
+            raise ConnectionResetError("Stream closed by remote host.")
+        elif line[-1] != ord(until):
+            raise EOFError("Line ended early.")
+        else:
+            return line
+
+    async def process_line(self, line):
         try:
-            data = protocol.unpack(await nextline(self.instr))
+            data = protocol.unpack(line)
         except JSONDecodeError as e:
             echo("recv", "Invalid JSON received from {}".format(self))
             await self.send(
-                protocol.response("0", err=protocol.Errors.parse_error(str(e)))
+                protocol.make_response("0", err=protocol.Errors.parse_error(str(e)))
             )
             return
 
@@ -55,14 +68,35 @@ class Remote:
             # Message is a RESPONSE.
             echo("recv", "Receiving a Response from {}".format(self))
             mid = data["id"]
-            if mid in self.need_response:
+            if mid in self.futures:
                 # Something is waiting for this message.
-                func = self.need_response[mid]
-                del self.need_response[mid]
-                self.active.append(asyncio.ensure_future(func(data, self)))
+                future: asyncio.Future = self.futures[mid]
+                del self.futures[mid]
+
+                if future.done():
+                    warn(
+                        "Received a Response for a closed Future. UUID: {}".format(mid)
+                    )
+                elif future.cancelled():
+                    warn(
+                        "Received a Response for a cancelled Future. UUID: {}".format(
+                            mid
+                        )
+                    )
+                else:
+                    # We need to fulfill this Future now.
+                    if "error" in data:
+                        # Server sent an Error Response. Forward it to the Future.
+                        eline = "Error {}: {}".format(data["error"]["code"], data["error"]["message"])
+                        e = RemoteError(eline, data["error"]["data"] if "data" in data["error"] else None, mid)
+                        future.set_exception(e)
+                    else:
+                        # Server sent a Result Response. Give it to the Future.
+                        future.set_result(data["result"])
             else:
-                # Nothing is waiting for this message...Save it anyway.
-                self.unhandled[mid] = data
+                # Nothing is waiting for this message. Make a note and move on.
+                warn("Received an unsolicited Response. UUID: {}".format(mid))
+
         elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
             echo(
@@ -77,11 +111,12 @@ class Remote:
             else:
                 # We have no hook for this method; Return an Error.
                 await self.send(
-                    protocol.response(
+                    protocol.make_response(
                         data["id"],
                         err=protocol.Errors.method_not_found(data.get("method")),
                     )
                 )
+
         elif protocol.verify_notif(keys, data):
             # Message is a NOTIFICATION.
             echo(
@@ -90,18 +125,19 @@ class Remote:
             )
             if data["method"] == "TERM":
                 # The connection is being explicitly terminated.
-                raise ConnectionResetError("Connection terminated by peer.")
+                raise ConnectionResetError(data["params"]["reason"] or "Connection terminated by peer.")
             elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
                 self.active.append(asyncio.ensure_future(func(data, self)))
+
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.
             echo("", "Received an invalid Request from {}".format(self))
             if "id" in data:
                 await self.send(
-                    protocol.response(
+                    protocol.make_response(
                         data["id"],
                         err=protocol.Errors.invalid_request(list(data.keys())),
                     )
@@ -123,7 +159,7 @@ class Remote:
         """Signal to the Remote that `func` is waiting for a Response with an ID
             field of `uuid`.
         """
-        self.need_response[uuid] = func
+        self.futures[uuid] = func
 
     def close(self):
         for coro in self.active:
@@ -142,7 +178,7 @@ class Remote:
     async def loop(self):
         try:
             while True:
-                await self.get_data()
+                await self.process_line(await self.get_line())
                 tasks = asyncio.gather(*self.active)
                 self.active = []
                 await tasks
@@ -164,11 +200,11 @@ class Remote:
         try:
             echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
             if type(params) == dict:
-                await self.send(protocol.notif(meth, **params))
+                await self.send(protocol.make_notif(meth, **params))
             elif type(params) == list:
-                await self.send(protocol.notif(meth, *params))
+                await self.send(protocol.make_notif(meth, *params))
             else:
-                await self.send(protocol.notif(meth))
+                await self.send(protocol.make_notif(meth))
         except Exception as e:
             if nohandle:
                 raise e
@@ -176,44 +212,50 @@ class Remote:
 
     async def request(
         self, meth: str, params: Union[dict, list] = None, callback=None, nohandle=False
-    ) -> Tuple[str, dt]:
+    ) -> asyncio.Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
-            and return the UUID and timestamp of the message, so that we can
-            find the Response.
+            and return a Future to represent the eventual result.
         """
         echo("send", "Sending a '{}' Request to {}.".format(meth, self))
 
         if type(params) == dict:
-            data, mid = protocol.request(meth, **params)
+            data, mid = protocol.make_request(meth, **params)
         elif type(params) == list:
-            data, mid = protocol.request(meth, *params)
+            data, mid = protocol.make_request(meth, *params)
         else:
-            data, mid = protocol.request(meth)
+            data, mid = protocol.make_request(meth)
+
+        # Create a Future which will represent the Response.
+        future: asyncio.Future = self.eventloop.create_future()
+        self.hook_response(mid, future)
 
         if callback:
-            self.hook_response(mid, callback)
+            cb = partial(callback, remote=self)
+            future.add_done_callback(cb)
 
         try:
             await self.send(data)
-            return mid, dt.utcnow()
         except Exception as e:
             if nohandle:
                 raise e
             err_("Failed to send Request:", e)
-            return mid, dt.utcnow()
+        finally:
+            return future
 
-    async def respond(self, mid: str, *, err=None, res=None, nohandle=False):
+    async def respond(self, mid: str, method=None, *, err=None, res=None, nohandle=False):
         echo(
             "send",
-            "Sending {} to {}.".format(
-                "an Error Response" if err else "a Result Response", self
+            "Sending {}{} to {}.".format(
+                "an Error Response" if err else "a Result Response",
+                " for '{}'".format(method) if method else "",
+                self
             ),
         )
         try:
             await self.send(
-                protocol.response(mid, err=err)
+                protocol.make_response(mid, err=err)
                 if err
-                else protocol.response(mid, res=res)
+                else protocol.make_response(mid, res=res)
             )
         except Exception as e:
             if nohandle:
@@ -226,10 +268,7 @@ class Remote:
 
     async def terminate(self, reason: str = None):
         try:
-            if reason:
-                await self.notif("TERM", {"reason": reason}, nohandle=True)
-            else:
-                await self.notif("TERM", nohandle=True)
+            await self.notif("TERM", {"reason": reason}, nohandle=True)
         except Exception as e:
             err_("Failed to send TERM:", e)
         finally:

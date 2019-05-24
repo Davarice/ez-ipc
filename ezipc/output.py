@@ -5,15 +5,16 @@ from colorama import init, Fore
 
 init()
 prefices = {
-    "": ("", 1),
-    "con": (" ++", 1),
-    "dcon": ("-X ", 1),
-    "diff": ("*- ", 2),
-    "err": ("x!x", 2),
-    "info": ("(!)", 4),
-    "recv": ("-->", 3),
-    "send": ("<--", 3),
-    "tab": ("   ", 3),
+    "": (Fore.WHITE, "", 1),
+    "con": (Fore.WHITE, " ++", 1),
+    "dcon": (Fore.WHITE, "-X ", 1),
+    "diff": (Fore.WHITE, "*- ", 2),
+    "err": (Fore.MAGENTA, "x!x", 3),
+    "warn": (Fore.MAGENTA, "(!)", 3),
+    "info": (Fore.CYAN, "(!)", 4),
+    "recv": (Fore.WHITE, "-->", 3),
+    "send": (Fore.WHITE, "<--", 3),
+    "tab": (Fore.WHITE, "   ", 3),
 }
 
 
@@ -22,23 +23,16 @@ class _Printer:
         self.verbosity = verbosity
         self.startup = dt.utcnow()
 
-    def emit(self, prefix, text, pri=4):
+    def emit(self, etype, text, color=Fore.RESET):
+        p_color, prefix, pri = prefices.get(etype) or (Fore.WHITE, etype, 4)
         if pri <= self.verbosity:
             print(
-                "".join(
-                    [
-                        "<",
-                        # str(dt.utcnow() - self.startup)[:-7],
-                        str(dt.utcnow())[11:-7],
-                        "> ",
-                        Fore.WHITE,
-                        prefix,
-                        Fore.RESET,
-                        " ",
-                        str(text),
-                        Fore.RESET,
-                    ]
-                )
+                "<{} | {}> {} {}".format(
+                    str(dt.utcnow())[11:-4],  # Current Time
+                    str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
+                    p_color + prefix,
+                    color + str(text) + Fore.RESET,
+                    )
             )
 
 
@@ -46,16 +40,17 @@ P = _Printer()
 
 
 def echo(etype: str, text: str):
-    if not text:
-        P.emit("?? ", etype, 4)
-    etype_, pri = prefices.get(etype, ("?? ", 4))
-    P.emit(etype_, text, pri)
+    P.emit(etype, text)
 
 
 def err(text: str, exc: Exception = None):
     if exc:
         text += " {} - {}".format(type(exc).__name__, exc)
     echo("err", Fore.RED + text)
+
+
+def warn(text: str):
+    echo("warn", Fore.YELLOW + text)
 
 
 def set_verbosity(n: int):

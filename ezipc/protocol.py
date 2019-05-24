@@ -78,7 +78,7 @@ class Errors:
         return cls.new(-32603, "Internal error", data)
 
 
-def notif(*args, **kwargs) -> bytes:
+def make_notif(*args, **kwargs) -> bytes:
     """Make a Notification, to be sent without expectation of a Response.
 
     Contains:
@@ -93,10 +93,10 @@ def notif(*args, **kwargs) -> bytes:
     return json.dumps(req, **JSON_OPTS).encode("utf-8")
 
 
-def request(*args, **kwargs) -> Tuple[bytes, str]:
+def make_request(*args, **kwargs) -> Tuple[bytes, str]:
     """Make a Request, a message that will yield a Response.
 
-    Contains ALL fields documented in `notif` above, PLUS:
+    Contains ALL fields documented in `make_notif` above, PLUS:
         "id": Newly-generated UUID of the Request, for replication in Response.
     """
     req = _make(*args, **kwargs)
@@ -106,7 +106,7 @@ def request(*args, **kwargs) -> Tuple[bytes, str]:
     return json.dumps(req, **JSON_OPTS).encode("utf-8"), mid
 
 
-def response(mid: str, res=None, err: dict = None) -> bytes:
+def make_response(mid: str, res=None, err: dict = None) -> bytes:
     """Make a Response, to be sent in reply to a Request.
 
     Contains:

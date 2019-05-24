@@ -24,6 +24,7 @@ class Server:
         self.addr = addr
         self.port = port
 
+        self.eventloop = None
         self.remotes = set()
         self.server = None
         self.startup = dt.utcnow()
@@ -38,9 +39,9 @@ class Server:
 
         async def cb_pong(data, conn: Remote):
             await conn.respond(
-                data["id"], res={"method": "PONG", "params": data["params"]}
+                data["id"], data["method"], res={"method": "PONG", "params": data["params"]}
             ) if "params" in data else conn.respond(
-                data["id"], res={"method": "PONG", "params": None}
+                data["id"], data["method"], res={"method": "PONG", "params": None}
             )
 
         self.hook_request("PING", cb_pong)
@@ -108,7 +109,7 @@ class Server:
                 str_out.get_extra_info("peername", ("Unknown Address", 0))[0]
             )
         )
-        remote = Remote(str_in, str_out)
+        remote = Remote(self.eventloop, str_in, str_out)
 
         # Replace the Client Hooks with our own. Since these are Mutable, this
         #   keeps them consistent across all Clients.
@@ -122,22 +123,29 @@ class Server:
 
         self.remotes.add(remote)
         await self.broadcast("CENSUS", {"client_count": len(self.remotes)})
-        echo("edit",
+        echo("diff",
             "Client at {} has been assigned UUID {}.".format(remote.host, remote.id)
         )
-        await remote.loop()
+        try:
+            await remote.loop()
+        except:
+            err("Connection to {} closed.")
+        finally:
+            self.remotes.remove(remote)
 
     async def run(self, loop=None):
         """Server Coroutine. Does not setup or wrap the Server. Intended for use
             in instances where other things must be done, and the Server needs
             to be run properly asynchronously.
         """
+        self.eventloop = loop or asyncio.get_event_loop()
+
         echo("", "Running Server on {}:{}".format(self.addr, self.port))
         self.server = await asyncio.start_server(
             self.open_connection,
             self.addr,
             self.port,
-            loop=loop or asyncio.get_event_loop(),
+            loop=self.eventloop,
         )
         await self.server.serve_forever()
 

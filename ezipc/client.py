@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime as dt
 
 from .common import Remote
-from .output import echo, err, P
+from .output import echo, err, P, warn
 
 
 class Client:
@@ -19,8 +19,11 @@ class Client:
     def __init__(self, addr: str = "127.0.0.1", port: int = 9002):
         self.addr = addr
         self.port = port
+
+        self.eventloop = None
         self.remote = None
         self.listening = None
+
         self.startup = dt.utcnow()
 
     @property
@@ -28,47 +31,56 @@ class Client:
         return bool(self.remote and not self.remote.outstr.is_closing())
 
     async def _add_hooks(self):
+        response = await self.remote.request("TIME")
+
         async def cb_recv(data, conn):
-            echo("",
-                "Received '{}' from Remote {}.".format(
-                    data.get("params", data["method"]), conn.id
-                )
+            echo(
+                "info",
+                "Currently '{}' Client(s) connected to {}.".format(
+                    data.get("params", {}).get("client_count", "(?)"), conn
+                ),
             )
-            await conn.respond(data["id"], res=[True])
+            await conn.respond(data["id"], data["method"], res=[True])
 
         self.remote.hook_request("CENSUS", cb_recv)
 
-        async def cb_time(data, conn):
-            ts = data.get("result", {}).get("startup", 0)
+        # await self.remote.request("TIME", callback=cb_time)
+        await response
+
+        if response.cancelled() or response.exception():
+            warn("Failed to get Server Uptime.")
+        else:
+            ts = response.result().get("startup", 0)
             if ts:
                 self.startup = dt.fromtimestamp(ts)
-                conn.startup = self.startup
                 P.startup = self.startup
-            echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
-
-        await self.remote.request("TIME", callback=cb_time)
+                echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
 
     async def connect(self, loop):
-        streams = await asyncio.open_connection(self.addr, self.port)
-        self.remote = Remote(*streams)
-        echo("con",
+        streams = await asyncio.open_connection(self.addr, self.port, loop=loop)
+        self.remote = Remote(loop, *streams)
+        echo(
+            "con",
             "Connected to Host. Server has been given the alias '{}'.".format(
                 self.remote.id
-            )
+            ),
         )
         self.listening = loop.create_task(self.remote.loop())
         await self._add_hooks()
 
     async def disconnect(self):
         if self.listening:
-            self.listening.cancel()
+            # if not self.listening.done():
+            #     self.listening.cancel()
             self.listening = None
 
         if self.alive:
             try:
                 await self.remote.close()
             except Exception:
-                return
+                pass
+            finally:
+                self.remote = None
 
     async def run_through(self, *coros, loop=None):
         """Construct a Coroutine that will sequentially run an arbitrary number
@@ -80,11 +92,11 @@ class Client:
         async def run():
             for coro in coros:
                 await coro(self)
-            await asyncio.sleep(60)
 
         try:
             await self.connect(loop)
             await run()
+
         except ConnectionRefusedError:
             err("Connection Refused.")
         except ConnectionError as e:
@@ -106,9 +118,14 @@ class Client:
             except:
                 err("Closing immediately.")
 
-        except Exception as e:
-            err("Client closing due to unexpected", e)
+        # except Exception as e:
+        #     err("Client closing due to unexpected", e)
         else:
             echo("", "Done.")
+            try:
+                await self.remote.terminate("Program Completed")
+                echo("info", "Connection ended.")
+            except:
+                err("Closing immediately.")
         finally:
             await self.disconnect()

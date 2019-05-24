@@ -1,15 +1,10 @@
 import asyncio
 
 
-async def nextline(r: asyncio.StreamReader, until=b"\n"):
-    line: bytes = await r.readuntil(until)
-    if line == b"":
-        raise ConnectionResetError("Stream closed by remote host.")
-    elif line[-1] != ord(until):
-        raise EOFError("Line ended early.")
-    else:
-        return line
+def callback(coro):
+    """Prepare a given Coroutine to interpret a Future as its Result."""
+    async def callback_(future: asyncio.Future, *a, **kw):
+        if future.done():
+            return coro(future.result(), *a, **kw)
 
-
-class ConnectionKill(Exception):
-    pass
+    return callback_
