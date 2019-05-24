@@ -75,23 +75,26 @@ class Server:
             else:
                 warn("Broadcast '{}' NOT received by {}.".format(meth, remote))
 
-        for remote_, request in [
-            (remote_, remote_.request(meth, params, cb_broadcast or cb_confirm))
-            for remote_ in self.remotes
-            if not remote_.outstr.is_closing()
-        ]:
+        reqs = []
+        for remote_ in self.remotes:
+            reqs.append(
+                (
+                    remote_,
+                    await remote_.request(meth, params, cb_broadcast or cb_confirm),
+                )
+            )
+
+        for remote_, request in reqs:
             try:
-                await request
+                await asyncio.wait_for(request, 10)
             except Exception:
-                err("{} is not responding.".format(remote_))
-                try:
-                    asyncio.ensure_future(request).cancel()
-                    await remote_.close()
-                finally:
-                    self.remotes.remove(remote_)
+                warn("{} timed out.".format(remote_))
+                self.drop(remote_)
 
     def drop(self, remote):
-        pass
+        self.total_sent.update(remote.total_sent)
+        self.total_recv.update(remote.total_recv)
+        self.remotes.remove(remote)
 
     async def kill(self):
         for remote in self.remotes:
@@ -130,9 +133,7 @@ class Server:
         except:
             err("Connection to {} closed.")
         finally:
-            self.total_sent.update(remote.total_sent)
-            self.total_recv.update(remote.total_recv)
-            self.remotes.remove(remote)
+            self.drop(remote)
 
     async def run(self, loop=None):
         """Server Coroutine. Does not setup or wrap the Server. Intended for use
