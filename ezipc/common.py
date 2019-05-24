@@ -1,6 +1,7 @@
 """Module defining a superclass with methods common to Clients and Servers."""
 
 import asyncio
+from collections import Counter
 from datetime import datetime as dt
 from functools import partial
 from json import JSONDecodeError
@@ -24,6 +25,8 @@ class Remote:
 
         self.futures = {}  # {"uuid": asyncio.Future}
         self.tasks = []
+        self.total_sent = Counter(notif=0, request=0, response=0)
+        self.total_recv = Counter(notif=0, request=0, response=0)
 
         self.group = group
         self.id = hex(
@@ -78,6 +81,7 @@ class Remote:
         if protocol.verify_response(keys, data):
             # Message is a RESPONSE.
             echo("recv", "Receiving a Response from {}".format(self))
+            self.total_recv["response"] += 1
             mid = data["id"]
             if mid in self.futures:
                 # Something is waiting for this message.
@@ -117,6 +121,7 @@ class Remote:
             echo(
                 "recv", "Receiving a '{}' Request from {}".format(data["method"], self)
             )
+            self.total_recv["request"] += 1
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
@@ -138,6 +143,7 @@ class Remote:
                 "recv",
                 "Receiving a '{}' Notification from {}".format(data["method"], self),
             )
+            self.total_recv["notif"] += 1
             if data["method"] == "TERM":
                 # The connection is being explicitly terminated.
                 raise ConnectionResetError(
@@ -217,6 +223,7 @@ class Remote:
         """Assemble and send a JSON-RPC Notification with the given data."""
         try:
             echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
+            self.total_sent["notif"] += 1
             if type(params) == dict:
                 await self.send(protocol.make_notif(meth, **params))
             elif type(params) == list:
@@ -235,6 +242,7 @@ class Remote:
             and return a Future to represent the eventual result.
         """
         echo("send", "Sending a '{}' Request to {}.".format(meth, self))
+        self.total_sent["request"] += 1
 
         if type(params) == dict:
             data, mid = protocol.make_request(meth, **params)
@@ -271,6 +279,7 @@ class Remote:
                 self,
             ),
         )
+        self.total_sent["response"] += 1
         try:
             await self.send(
                 protocol.make_response(mid, err=err)

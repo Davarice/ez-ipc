@@ -1,4 +1,5 @@
 import asyncio
+from collections import Counter
 from datetime import datetime as dt
 
 from .common import Remote
@@ -29,7 +30,9 @@ class Server:
         self.remotes = set()
         self.server = None
         self.startup = dt.utcnow()
-        self.total = 0
+        self.total_clients = 0
+        self.total_sent = Counter(notif=0, request=0, response=0)
+        self.total_recv = Counter(notif=0, request=0, response=0)
 
         self.hooks_notif = {}
         self.hooks_request = {}
@@ -94,18 +97,20 @@ class Server:
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
-        echo("", "Server closed.")
+        echo("dcon", "Server closed.")
 
     async def open_connection(
         self, str_in: asyncio.StreamReader, str_out: asyncio.StreamWriter
     ):
         """Callback executed by AsyncIO when a Client contacts the Server."""
-        echo("con",
+        echo(
+            "con",
             "Incoming Connection from Client at `{}`.".format(
                 str_out.get_extra_info("peername", ("Unknown Address", 0))[0]
-            )
+            ),
         )
         remote = Remote(self.eventloop, str_in, str_out)
+        self.total_clients += 1
 
         # Update the Client Hooks with our own.
         remote.hooks_notif.update(self.hooks_notif)
@@ -114,14 +119,17 @@ class Server:
 
         self.remotes.add(remote)
         await self.broadcast("CENSUS", {"client_count": len(self.remotes)})
-        echo("diff",
-            "Client at {} has been assigned UUID {}.".format(remote.host, remote.id)
+        echo(
+            "diff",
+            "Client at {} has been assigned UUID {}.".format(remote.host, remote.id),
         )
         try:
             await remote.loop()
         except:
             err("Connection to {} closed.")
         finally:
+            self.total_sent.update(remote.total_sent)
+            self.total_recv.update(remote.total_recv)
             self.remotes.remove(remote)
 
     async def run(self, loop=None):
@@ -131,13 +139,11 @@ class Server:
         """
         self.eventloop = loop or asyncio.get_event_loop()
 
-        echo("", "Running Server on {}:{}".format(self.addr, self.port))
+        echo("info", "Running Server on {}:{}".format(self.addr, self.port))
         self.server = await asyncio.start_server(
-            self.open_connection,
-            self.addr,
-            self.port,
-            loop=self.eventloop,
+            self.open_connection, self.addr, self.port, loop=self.eventloop
         )
+        echo("win", "Ready to begin accepting Requests.")
         await self.server.serve_forever()
 
     def start(self, *a, **kw):
@@ -151,10 +157,27 @@ class Server:
         except KeyboardInterrupt:
             err("INTERRUPTED. Server closing...")
         except Exception as e:
-            err("Server closing due to unexpected {}: {}".format(type(e).__name__, e))
+            err("Server closing due to unexpected", e)
         else:
-            echo("", "Server closing...")
+            echo("dcon", "Server closing...")
         finally:
+            echo("info", "Served {} Clients.".format(self.total_clients))
+            echo("info", "Sent:")
+            echo(
+                "tab",
+                [
+                    "> {} {}s".format(v, k.capitalize())
+                    for k, v in self.total_sent.items()
+                ],
+            )
+            echo("info", "Received:")
+            echo(
+                "tab",
+                [
+                    "> {} {}s".format(v, k.capitalize())
+                    for k, v in self.total_recv.items()
+                ],
+            )
             try:
                 asyncio.run(self.kill())
             except Exception:

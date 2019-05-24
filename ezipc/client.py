@@ -123,4 +123,20 @@ class Client:
             echo("win", "Program complete. Closing...")
             await self.terminate("Program Completed")
         finally:
+            echo("info", "Sent:")
+            echo(
+                "tab",
+                [
+                    "> {} {}s".format(v, k.capitalize())
+                    for k, v in self.remote.total_sent.items()
+                ],
+            )
+            echo("info", "Received:")
+            echo(
+                "tab",
+                [
+                    "> {} {}s".format(v, k.capitalize())
+                    for k, v in self.remote.total_recv.items()
+                ],
+            )
             await self.disconnect()

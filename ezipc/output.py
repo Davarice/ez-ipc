@@ -1,4 +1,5 @@
 from datetime import datetime as dt
+from typing import List, Union
 
 from colorama import init, Fore
 
@@ -7,7 +8,7 @@ init()
 prefices = {
     "": (Fore.WHITE, "", 1),
     "con": (Fore.WHITE, " ++", 1),
-    "dcon": (Fore.WHITE, "X- ", 1),
+    "dcon": (Fore.LIGHTBLACK_EX, "X- ", 1),
     "win": (Fore.LIGHTGREEN_EX, "\o/", 2),
     "diff": (Fore.WHITE, "*- ", 2),
     "err": (Fore.MAGENTA, "x!x", 3),
@@ -30,22 +31,24 @@ class _Printer:
             print(
                 # TODO: Decide which of these is better
                 # "<{}> {} {}".format(  # One Time format
-                # Fore.RESET +
                 "<{} | {}> {} {}".format(  # Two Times format
                     str(dt.utcnow())[11:-4],  # Current Time
                     str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
                     p_color + prefix,
                     color + str(text) + Fore.RESET,
                     )
-                # + Fore.LIGHTRED_EX
             )
 
 
 P = _Printer()
 
 
-def echo(etype: str, text: str):
-    P.emit(etype, text)
+def echo(etype: str, text: Union[str, List[str]]):
+    if type(text) == list:
+        for line in text:
+            P.emit(etype, line)
+    else:
+        P.emit(etype, text)
 
 
 def err(text: str, exc: Exception = None):
