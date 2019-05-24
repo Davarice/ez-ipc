@@ -1,23 +1,59 @@
 from datetime import datetime as dt
 from typing import List, Union
 
-from colorama import init, Fore
+
+class Fake:
+    BLACK           = ""
+    RED             = ""
+    GREEN           = ""
+    YELLOW          = ""
+    BLUE            = ""
+    MAGENTA         = ""
+    CYAN            = ""
+    WHITE           = ""
+    RESET           = ""
+    LIGHTBLACK_EX   = ""
+    LIGHTRED_EX     = ""
+    LIGHTGREEN_EX   = ""
+    LIGHTYELLOW_EX  = ""
+    LIGHTBLUE_EX    = ""
+    LIGHTMAGENTA_EX = ""
+    LIGHTCYAN_EX    = ""
+    LIGHTWHITE_EX   = ""
 
 
-init()
-prefices = {
-    "": (Fore.WHITE, "", 1),
-    "con": (Fore.WHITE, " ++", 1),
-    "dcon": (Fore.LIGHTBLACK_EX, "X- ", 1),
-    "win": (Fore.LIGHTGREEN_EX, "\o/", 2),
-    "diff": (Fore.WHITE, "*- ", 2),
-    "err": (Fore.MAGENTA, "x!x", 3),
-    "recv": (Fore.WHITE, "-->", 3),
-    "send": (Fore.LIGHTBLACK_EX, "<--", 3),
-    "tab": (Fore.WHITE, "   ", 3),
-    "warn": (Fore.MAGENTA, "(!)", 3),
-    "info": (Fore.CYAN, "(!)", 4),
-}
+try:
+    from colorama import init, Fore
+    init()
+except ImportError:
+    init = None
+    Fore = Fake
+
+Color = None
+prefices = {}
+
+
+def set_colors(use_real):
+    global Color
+    global prefices
+
+    Color = Fore if use_real else Fake
+    prefices = {
+        "": (Color.WHITE, "", 1),
+        "con": (Color.WHITE, " ++", 1),
+        "dcon": (Color.LIGHTBLACK_EX, "X- ", 1),
+        "win": (Color.LIGHTGREEN_EX, "\o/", 2),
+        "diff": (Color.WHITE, "*- ", 2),
+        "err": (Color.MAGENTA, "x!x", 3),
+        "recv": (Color.WHITE, "-->", 3),
+        "send": (Color.LIGHTBLACK_EX, "<--", 3),
+        "tab": (Color.WHITE, "   ", 3),
+        "warn": (Color.MAGENTA, "(!)", 3),
+        "info": (Color.CYAN, "(!)", 4),
+    }
+
+
+set_colors(True)
 
 
 class _Printer:
@@ -25,8 +61,8 @@ class _Printer:
         self.verbosity = verbosity
         self.startup = dt.utcnow()
 
-    def emit(self, etype, text, color=Fore.RESET):
-        p_color, prefix, pri = prefices.get(etype) or (Fore.WHITE, etype, 4)
+    def emit(self, etype, text, color=Color.RESET):
+        p_color, prefix, pri = prefices.get(etype) or (Color.WHITE, etype, 4)
         if pri <= self.verbosity:
             print(
                 # TODO: Decide which of these is better
@@ -35,7 +71,7 @@ class _Printer:
                     str(dt.utcnow())[11:-4],  # Current Time
                     str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
                     p_color + prefix,
-                    color + str(text) + Fore.RESET,
+                    color + str(text) + Color.RESET,
                     )
             )
 
@@ -54,11 +90,11 @@ def echo(etype: str, text: Union[str, List[str]]):
 def err(text: str, exc: Exception = None):
     if exc:
         text += " {} - {}".format(type(exc).__name__, exc)
-    echo("err", Fore.RED + text)
+    echo("err", Color.RED + text)
 
 
 def warn(text: str):
-    echo("warn", Fore.LIGHTYELLOW_EX + text)
+    echo("warn", Color.LIGHTYELLOW_EX + text)
 
 
 def set_verbosity(n: int):
