@@ -32,19 +32,6 @@ class Client:
 
     async def _add_hooks(self):
         response = await self.remote.request("TIME")
-
-        async def cb_census(data, conn):
-            echo(
-                "info",
-                "Currently {} Client(s) connected to {}.".format(
-                    data.get("params", {}).get("client_count", "(?)"), conn
-                ),
-            )
-            await conn.respond(data["id"], data["method"], res=[True])
-
-        self.remote.hook_request("CENSUS", cb_census)
-
-        # await self.remote.request("TIME", callback=cb_time)
         await response
 
         if response.cancelled() or response.exception():

@@ -1,6 +1,7 @@
 import asyncio
 from collections import Counter
 from datetime import datetime as dt
+from typing import Union
 
 from .common import Remote
 from .etc import future_callback
@@ -61,19 +62,21 @@ class Server:
         """
         self.hooks_request[method] = func
 
-    async def broadcast(self, meth: str, params=None):
+    async def broadcast(
+        self, meth: str, params: Union[dict, list] = None, cb_broadcast=None
+    ):
         if not self.remotes:
             return
 
         @future_callback
-        def cb_broadcast(data, remote):
+        def cb_confirm(data, remote):
             if data:
                 echo("tab", "Broadcast '{}' received by {}.".format(meth, remote))
             else:
                 warn("Broadcast '{}' NOT received by {}.".format(meth, remote))
 
         for remote_, request in [
-            (remote_, remote_.request(meth, params, cb_broadcast))
+            (remote_, remote_.request(meth, params, cb_broadcast or cb_confirm))
             for remote_ in self.remotes
             if not remote_.outstr.is_closing()
         ]:
@@ -118,7 +121,6 @@ class Server:
         remote.startup = self.startup
 
         self.remotes.add(remote)
-        await self.broadcast("CENSUS", {"client_count": len(self.remotes)})
         echo(
             "diff",
             "Client at {} has been assigned UUID {}.".format(remote.host, remote.id),
