@@ -3,27 +3,28 @@ from typing import List, Union
 
 
 class Fake:
-    BLACK           = ""
-    RED             = ""
-    GREEN           = ""
-    YELLOW          = ""
-    BLUE            = ""
-    MAGENTA         = ""
-    CYAN            = ""
-    WHITE           = ""
-    RESET           = ""
-    LIGHTBLACK_EX   = ""
-    LIGHTRED_EX     = ""
-    LIGHTGREEN_EX   = ""
-    LIGHTYELLOW_EX  = ""
-    LIGHTBLUE_EX    = ""
+    BLACK = ""
+    RED = ""
+    GREEN = ""
+    YELLOW = ""
+    BLUE = ""
+    MAGENTA = ""
+    CYAN = ""
+    WHITE = ""
+    RESET = ""
+    LIGHTBLACK_EX = ""
+    LIGHTRED_EX = ""
+    LIGHTGREEN_EX = ""
+    LIGHTYELLOW_EX = ""
+    LIGHTBLUE_EX = ""
     LIGHTMAGENTA_EX = ""
-    LIGHTCYAN_EX    = ""
-    LIGHTWHITE_EX   = ""
+    LIGHTCYAN_EX = ""
+    LIGHTWHITE_EX = ""
 
 
 try:
     from colorama import init, Fore
+
     init()
 except ImportError:
     init = None
@@ -72,7 +73,7 @@ class _Printer:
                     str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
                     p_color + prefix,
                     color + str(text) + Color.RESET,
-                    )
+                )
             )
 
 
