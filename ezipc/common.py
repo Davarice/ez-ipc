@@ -205,10 +205,11 @@ class Remote:
             err_("Connection with {} failed: Stream ended.".format(self))
             self.close()
         except ConnectionError as e:
-            err_("Connection with {} closed:".format(self), e)
+            echo("dcon", "Connection with {} closed: {}".format(self, e))
             self.close()
         except asyncio.CancelledError:
-            err_("Listening to {} was cancelled.".format(self))
+            # err_("Listening to {} was cancelled.".format(self))
+            pass
         except Exception as e:
             err_("Connection with {} failed:".format(self), e)
 

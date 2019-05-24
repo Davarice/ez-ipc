@@ -36,7 +36,7 @@ class Client:
         async def cb_census(data, conn):
             echo(
                 "info",
-                "Currently '{}' Client(s) connected to {}.".format(
+                "Currently {} Client(s) connected to {}.".format(
                     data.get("params", {}).get("client_count", "(?)"), conn
                 ),
             )
@@ -70,8 +70,8 @@ class Client:
 
     async def disconnect(self):
         if self.listening:
-            # if not self.listening.done():
-            #     self.listening.cancel()
+            if not self.listening.done():
+                self.listening.cancel()
             self.listening = None
 
         if self.alive:
@@ -81,6 +81,13 @@ class Client:
                 pass
             finally:
                 self.remote = None
+
+    async def terminate(self, death_rattle: str = None):
+        try:
+            await self.remote.terminate(death_rattle)
+            echo("dcon", "Connection terminated.")
+        except:
+            err("Skipping niceties.")
 
     async def run_through(self, *coros, loop=None):
         """Construct a Coroutine that will sequentially run an arbitrary number
@@ -104,28 +111,16 @@ class Client:
 
         except asyncio.CancelledError:
             err("CANCELLED. Client closing...")
-            try:
-                await self.remote.terminate("Coroutine Cancelled")
-                echo("info", "Connection Terminated.")
-            except:
-                err("Closing immediately.")
+            await self.terminate("Coroutine Cancelled")
 
         except KeyboardInterrupt:
             err("INTERRUPTED. Client closing...")
-            try:
-                await self.remote.terminate("KeyboardInterrupt")
-                echo("info", "Connection ended.")
-            except:
-                err("Closing immediately.")
+            await self.terminate("KeyboardInterrupt")
 
-        # except Exception as e:
-        #     err("Client closing due to unexpected", e)
+        except Exception as e:
+            err("Client closing due to unexpected", e)
         else:
-            echo("win", "Done.")
-            try:
-                await self.remote.terminate("Program Completed")
-                echo("info", "Connection ended.")
-            except:
-                err("Closing immediately.")
+            echo("win", "Program complete. Closing...")
+            await self.terminate("Program Completed")
         finally:
             await self.disconnect()

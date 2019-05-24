@@ -2,7 +2,8 @@ import asyncio
 from datetime import datetime as dt
 
 from .common import Remote
-from .output import echo, err
+from .etc import future_callback
+from .output import echo, err, warn
 
 
 class Server:
@@ -28,6 +29,7 @@ class Server:
         self.remotes = set()
         self.server = None
         self.startup = dt.utcnow()
+        self.total = 0
 
         self.hooks_notif = {}
         self.hooks_request = {}
@@ -60,14 +62,17 @@ class Server:
         if not self.remotes:
             return
 
-        async def cb_broadcast(data, remote):
-            if "result" in data:
-                echo("tab", "Broadcast received by {}.".format(remote))
+        @future_callback
+        def cb_broadcast(data, remote):
+            if data:
+                echo("tab", "Broadcast '{}' received by {}.".format(meth, remote))
+            else:
+                warn("Broadcast '{}' NOT received by {}.".format(meth, remote))
 
         for remote_, request in [
-            (conn, conn.request(meth, params, cb_broadcast))
-            for conn in self.remotes
-            if not conn.outstr.is_closing()
+            (remote_, remote_.request(meth, params, cb_broadcast))
+            for remote_ in self.remotes
+            if not remote_.outstr.is_closing()
         ]:
             try:
                 await request

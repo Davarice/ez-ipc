@@ -16,8 +16,8 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
         """
 
         @future_callback
-        async def receive(result, remote):
-            """Response handler Coroutine. Assigned to a Future, and called by
+        def receive(result, remote):
+            """Response handler Function. Assigned to a Future, and called by
                 it when a Response with that UUID is received.
             """
             echo(
@@ -27,7 +27,7 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
                 ),
             )
 
-        echo("", "Sending Requests...")
+        echo("info", "Sending Requests...")
 
         pongs = []
 
