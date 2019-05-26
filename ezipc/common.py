@@ -70,12 +70,8 @@ class Remote:
             data = protocol.unpack(line)
         except JSONDecodeError as e:
             echo("recv", "Invalid JSON received from {}".format(self))
-            await self.send(
-                protocol.make_response("0", err=protocol.Errors.parse_error(str(e)))
-            )
+            await self.respond("0", err=protocol.Errors.parse_error(str(e)))
             return
-
-        await asyncio.sleep(0.2)  # Allow a moment to finalize.
 
         keys = list(data.keys())
         if protocol.verify_response(keys, data):
@@ -130,11 +126,8 @@ class Remote:
                 self.tasks.append(tsk)
             else:
                 # We have no hook for this method; Return an Error.
-                await self.send(
-                    protocol.make_response(
-                        data["id"],
-                        err=protocol.Errors.method_not_found(data.get("method")),
-                    )
+                await self.respond(
+                    data["id"], err=protocol.Errors.method_not_found(data.get("method"))
                 )
 
         elif protocol.verify_notif(keys, data):
@@ -159,11 +152,8 @@ class Remote:
             #   send a Response containing an Error and a frowny face.
             echo("", "Received an invalid Request from {}".format(self))
             if "id" in data:
-                await self.send(
-                    protocol.make_response(
-                        data["id"],
-                        err=protocol.Errors.invalid_request(list(data.keys())),
-                    )
+                await self.respond(
+                    data["id"], err=protocol.Errors.invalid_request(list(data.keys()))
                 )
 
     def hook_notif(self, method: str, func):
