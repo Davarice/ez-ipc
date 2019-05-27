@@ -43,8 +43,21 @@ class Client:
                 P.startup = self.startup
                 echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
 
-    async def connect(self, loop):
-        streams = await asyncio.open_connection(self.addr, self.port, loop=loop)
+    async def connect(self, loop, timeout=10):
+        try:
+            streams = await asyncio.wait_for(
+                asyncio.open_connection(self.addr, self.port, loop=loop), timeout
+            )
+        except asyncio.TimeoutError:
+            err("Connection timed out after {}s.".format(timeout))
+            return False
+        except ConnectionRefusedError:
+            err("Connection Refused.")
+            return False
+        except ConnectionError as e:
+            err("Connection Lost:", e)
+            return False
+
         self.remote = Remote(loop, *streams)
         echo(
             "con",
@@ -54,6 +67,7 @@ class Client:
         )
         self.listening = loop.create_task(self.remote.loop())
         await self._add_hooks()
+        return True
 
     async def disconnect(self):
         if self.listening:
@@ -88,13 +102,8 @@ class Client:
                 await coro(self)
 
         try:
-            await self.connect(loop)
-            await run()
-
-        except ConnectionRefusedError:
-            err("Connection Refused.")
-        except ConnectionError as e:
-            err("Connection Lost:", e)
+            if await self.connect(loop):
+                await run()
 
         except asyncio.CancelledError:
             err("CANCELLED. Client closing...")
@@ -109,21 +118,23 @@ class Client:
         else:
             echo("win", "Program complete. Closing...")
             await self.terminate("Program Completed")
+
         finally:
-            echo("info", "Sent:")
-            echo(
-                "tab",
-                [
-                    "> {} {}s".format(v, k.capitalize())
-                    for k, v in self.remote.total_sent.items()
-                ],
-            )
-            echo("info", "Received:")
-            echo(
-                "tab",
-                [
-                    "> {} {}s".format(v, k.capitalize())
-                    for k, v in self.remote.total_recv.items()
-                ],
-            )
-            await self.disconnect()
+            if self.remote:
+                echo("info", "Sent:")
+                echo(
+                    "tab",
+                    [
+                        "> {} {}s".format(v, k.capitalize())
+                        for k, v in self.remote.total_sent.items()
+                    ],
+                )
+                echo("info", "Received:")
+                echo(
+                    "tab",
+                    [
+                        "> {} {}s".format(v, k.capitalize())
+                        for k, v in self.remote.total_recv.items()
+                    ],
+                )
+                await self.disconnect()
