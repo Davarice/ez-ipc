@@ -9,6 +9,7 @@ from typing import Union
 from uuid import uuid4
 
 from . import protocol
+from .connection import Connection
 from .exc import RemoteError
 from .output import echo, err as err_, warn
 
@@ -18,6 +19,7 @@ class Remote:
         self.eventloop: asyncio.AbstractEventLoop = eventloop
         self.instr = instr
         self.outstr = outstr
+        self.connection = Connection(instr, outstr)
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
         self.hooks_notif = {}  # {"method": function()}
@@ -55,6 +57,38 @@ class Remote:
             )
 
         self.hook_request("PING", cb_ping)
+
+    async def rsa_initiate(self):
+        if self.connection.box:
+            return False
+        else:
+            # Ask the remote Host for its Public Key, while providing our own.
+            get_key = await self.request("RSA.EXCH", [bytes(self.connection.key)])
+            try:
+                await get_key
+            except:
+                return False
+
+            key = get_key.result().get("result", [False])[0]
+            if key:
+                self.connection.add_key(key)
+            else:
+                return False
+
+            # Double check that the remote Host is ready to start encrypting.
+            confirm_key = await self.request("RSA.CONF", [True])
+            try:
+                await confirm_key
+            except:
+                return False
+
+            if confirm_key.result().get("result", [False])[0]:
+                # We can now start using encryption.
+                self.connection.begin_encryption()
+                return True
+            else:
+                # Something went wrong. Do NOT switch to encryption.
+                return False
 
     async def get_line(self, until=b"\n"):
         line: bytes = await self.instr.readuntil(until)
@@ -282,8 +316,7 @@ class Remote:
                 raise e
 
     async def send(self, data: bytes):
-        self.outstr.write(data if data[-1] == 10 else data + b"\n")
-        await self.outstr.drain()
+        await self.connection.write(data)
 
     async def terminate(self, reason: str = None):
         try:
