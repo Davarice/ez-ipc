@@ -65,16 +65,19 @@ class _Printer:
     def emit(self, etype, text, color=Color.RESET):
         p_color, prefix, pri = prefices.get(etype) or (Color.WHITE, etype, 4)
         if pri <= self.verbosity:
-            print(
+            self.output_line(
                 # TODO: Decide which of these is better
-                # "<{}> {} {}".format(  # One Time format
-                "<{} | {}> {} {}".format(  # Two Times format
+                "<{}> {} {}".format(  # One Time format
+                # "<{} | {}> {} {}".format(  # Two Times format
                     str(dt.utcnow())[11:-4],  # Current Time
-                    str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
+                    # str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
                     p_color + prefix,
                     color + str(text) + Color.RESET,
                 )
             )
+
+    def output_line(self, line):
+        print(line)
 
 
 P = _Printer()
