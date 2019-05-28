@@ -95,9 +95,9 @@ class Remote:
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
-            key = (
-                await self.request_wait("RSA.EXCH", [self.connection.key]) or [None]
-            )[0]
+            key = (await self.request_wait("RSA.EXCH", [self.connection.key], [None]))[
+                0
+            ]
 
             if key:
                 self.connection.add_key(key)
@@ -105,7 +105,7 @@ class Remote:
                 return False
 
             # Double check that the remote Host is ready to start encrypting.
-            if (await self.request_wait("RSA.CONF", [True]) or [False])[0]:
+            if (await self.request_wait("RSA.CONF", [True], [False]))[0]:
                 # We can now start using encryption.
                 self.connection.begin_encryption()
                 return True
@@ -287,7 +287,12 @@ class Remote:
                 raise e
 
     async def request(
-        self, meth: str, params: Union[dict, list] = None, callback=None, nohandle=False
+        self,
+        meth: str,
+        params: Union[dict, list] = None,
+        *,
+        callback=None,
+        nohandle=False
     ) -> asyncio.Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
@@ -320,14 +325,22 @@ class Remote:
             return future
 
     async def request_wait(
-        self, meth: str, *a, timeout=10, raise_remote_err=False, **kw
+        self,
+        meth: str,
+        params: Union[dict, list] = None,
+        default=None,
+        *,
+        callback=None,
+        nohandle=False,
+        timeout=10,
+        raise_remote_err=False
     ):
         """Send a JSON-RPC Request with the given data, the same as
             `Remote.request()`. However, rather than return the Future, handle
             it, and return None if the request timed out or (unless specified)
             yielded an Error Response.
         """
-        future = await self.request(meth, *a, **kw)
+        future = await self.request(meth, params, callback=callback, nohandle=nohandle)
         try:
             if timeout > 0:
                 await asyncio.wait_for(future, timeout)
@@ -338,10 +351,10 @@ class Remote:
             if raise_remote_err:
                 raise e
             else:
-                return None
+                return default
         except (asyncio.TimeoutError, asyncio.CancelledError):
             warn("{} Request timed out.".format(meth))
-            return None
+            return default
 
         else:
             return future.result()

@@ -80,7 +80,9 @@ class Server:
             reqs.append(
                 (
                     remote_,
-                    await remote_.request(meth, params, cb_broadcast or cb_confirm),
+                    await remote_.request(
+                        meth, params, callback=cb_broadcast or cb_confirm
+                    ),
                 )
             )
 
