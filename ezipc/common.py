@@ -45,6 +45,10 @@ class Remote:
     def host(self):
         return "{}:{}".format(self.addr, self.port)
 
+    @property
+    def is_secure(self):
+        return bool(self.connection.can_encrypt and self.connection.box)
+
     def __str__(self):
         return "Remote " + self.id
 
