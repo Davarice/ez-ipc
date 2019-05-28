@@ -58,18 +58,46 @@ class Remote:
 
         self.hook_request("PING", cb_ping)
 
+        async def cb_rsa_exchange(data, remote: Remote):
+            if remote.connection.can_encrypt:
+                echo(
+                    "info",
+                    [
+                        "Receiving a request for Secure Connection. Sending Key.",
+                        "(The connection is not encrypted yet.)",
+                    ],
+                )
+                remote.connection.add_key(data.get("params", [None])[0])
+                print(repr(remote.connection.key))
+                await remote.respond(
+                    data["id"], data["method"], res=[remote.connection.key]
+                )
+            else:
+                err_("Cannot establish a Secure Connection.")
+                await remote.respond(data["id"], data["method"], res=[False])
+
+        self.hook_request("RSA.EXCH", cb_rsa_exchange)
+
+        async def cb_rsa_confirm(data, remote: Remote):
+            if remote.connection.can_activate():
+                await remote.respond(data["id"], data["method"], res=[True])
+                remote.connection.begin_encryption()
+                echo("win", "Connection Secured by RSA Key Exchange.")
+
+        self.hook_request("RSA.CONF", cb_rsa_confirm)
+
     async def rsa_initiate(self):
         if self.connection.box:
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
-            get_key = await self.request("RSA.EXCH", [bytes(self.connection.key)])
+            get_key = await self.request("RSA.EXCH", [self.connection.key])
             try:
                 await get_key
             except:
                 return False
 
-            key = get_key.result().get("result", [False])[0]
+            key = get_key.result()[0]
             if key:
                 self.connection.add_key(key)
             else:
@@ -82,7 +110,7 @@ class Remote:
             except:
                 return False
 
-            if confirm_key.result().get("result", [False])[0]:
+            if confirm_key.result()[0]:
                 # We can now start using encryption.
                 self.connection.begin_encryption()
                 return True
@@ -103,14 +131,17 @@ class Remote:
         try:
             data = protocol.unpack(line)
         except JSONDecodeError as e:
-            echo("recv", "Invalid JSON received from {}".format(self))
+            warn("Invalid JSON received from {}.".format(self))
             await self.respond("0", err=protocol.Errors.parse_error(str(e)))
+            return
+        except UnicodeDecodeError:
+            warn("Corrupt data received from {}.".format(self))
             return
 
         keys = list(data.keys())
         if protocol.verify_response(keys, data):
             # Message is a RESPONSE.
-            echo("recv", "Receiving a Response from {}".format(self))
+            echo("recv", "Receiving a Response from {}...".format(self))
             self.total_recv["response"] += 1
             mid = data["id"]
             if mid in self.futures:
@@ -149,7 +180,8 @@ class Remote:
         elif protocol.verify_request(keys, data):
             # Message is a REQUEST.
             echo(
-                "recv", "Receiving a '{}' Request from {}".format(data["method"], self)
+                "recv",
+                "Receiving a '{}' Request from {}...".format(data["method"], self),
             )
             self.total_recv["request"] += 1
             if data["method"] in self.hooks_request:
@@ -168,7 +200,7 @@ class Remote:
             # Message is a NOTIFICATION.
             echo(
                 "recv",
-                "Receiving a '{}' Notification from {}".format(data["method"], self),
+                "Receiving a '{}' Notification from {}...".format(data["method"], self),
             )
             self.total_recv["notif"] += 1
             if data["method"] == "TERM":
