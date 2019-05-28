@@ -95,26 +95,17 @@ class Remote:
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
-            get_key = await self.request("RSA.EXCH", [self.connection.key])
-            try:
-                await get_key
-            except:
-                return False
+            key = (
+                await self.request_wait("RSA.EXCH", [self.connection.key]) or [None]
+            )[0]
 
-            key = get_key.result()[0]
             if key:
                 self.connection.add_key(key)
             else:
                 return False
 
             # Double check that the remote Host is ready to start encrypting.
-            confirm_key = await self.request("RSA.CONF", [True])
-            try:
-                await confirm_key
-            except:
-                return False
-
-            if confirm_key.result()[0]:
+            if (await self.request_wait("RSA.CONF", [True]) or [False])[0]:
                 # We can now start using encryption.
                 self.connection.begin_encryption()
                 return True
