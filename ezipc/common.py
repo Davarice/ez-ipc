@@ -72,7 +72,6 @@ class Remote:
                     ],
                 )
                 remote.connection.add_key(data.get("params", [None])[0])
-                print(repr(remote.connection.key))
                 await remote.respond(
                     data["id"], data["method"], res=[remote.connection.key]
                 )
