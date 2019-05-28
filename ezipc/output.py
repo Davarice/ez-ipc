@@ -62,7 +62,7 @@ class _Printer:
         self.verbosity = verbosity
         self.startup = dt.utcnow()
 
-    def emit(self, etype, text, color=Color.RESET):
+    def emit(self, etype, text, color=None):
         p_color, prefix, pri = prefices.get(etype) or (Color.WHITE, etype, 4)
         if pri <= self.verbosity:
             self.output_line(
@@ -72,7 +72,7 @@ class _Printer:
                     str(dt.utcnow())[11:-4],  # Current Time
                     # str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
                     p_color + prefix,
-                    color + str(text) + Color.RESET,
+                    (color or Color.RESET) + str(text) + Color.RESET,
                 )
             )
 
