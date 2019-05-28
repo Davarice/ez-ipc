@@ -91,9 +91,9 @@ class Client:
             finally:
                 self.remote = None
 
-    async def terminate(self, death_rattle: str = None):
+    async def terminate(self, reason: str = None):
         try:
-            await self.remote.terminate(death_rattle)
+            await self.remote.terminate(reason)
             echo("dcon", "Connection terminated.")
         except:
             err("Skipping niceties.")

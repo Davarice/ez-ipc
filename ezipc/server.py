@@ -1,15 +1,15 @@
 from asyncio import (
     AbstractEventLoop,
+    AbstractServer,
     get_event_loop,
     run,
-    StreamReader,
     start_server,
-    AbstractServer,
+    StreamReader,
     StreamWriter,
     TimeoutError,
     wait_for,
 )
-from collections import Counter
+from collections import Counter, Set
 from datetime import datetime as dt
 from typing import Union
 
@@ -117,12 +117,12 @@ class Server:
             else:
                 warn("Failed to establish Secure Connection with {}.".format(remote))
         except TimeoutError:
-            warn("Failed to establish Secure Connection with {}.".format(remote))
+            warn("Encryption Request to {} timed out.".format(remote))
 
-    async def kill(self):
+    async def terminate(self, reason: str = "Server Closing"):
         for remote in self.remotes:
-            await remote.terminate()
-        self.remotes = []
+            await remote.terminate(reason)
+        self.remotes: Set[Remote] = set()
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
@@ -187,29 +187,31 @@ class Server:
             run(self.run())
         except KeyboardInterrupt:
             err("INTERRUPTED. Server closing...")
+            run(self.terminate("Server Interrupted"))
         except Exception as e:
             err("Server closing due to unexpected", e)
+            run(self.terminate("Fatal Server Error"))
         else:
             echo("dcon", "Server closing...")
+            run(self.terminate())
         finally:
-            echo("info", "Served {} Clients.".format(self.total_clients))
-            echo("info", "Sent:")
-            echo(
-                "tab",
-                [
-                    "> {} {}s".format(v, k.capitalize())
-                    for k, v in self.total_sent.items()
-                ],
-            )
-            echo("info", "Received:")
-            echo(
-                "tab",
-                [
-                    "> {} {}s".format(v, k.capitalize())
-                    for k, v in self.total_recv.items()
-                ],
-            )
             try:
-                run(self.kill())
+                echo("info", "Served {} Clients.".format(self.total_clients))
+                echo("info", "Sent:")
+                echo(
+                    "tab",
+                    [
+                        "> {} {}s".format(v, k.capitalize())
+                        for k, v in self.total_sent.items()
+                    ],
+                )
+                echo("info", "Received:")
+                echo(
+                    "tab",
+                    [
+                        "> {} {}s".format(v, k.capitalize())
+                        for k, v in self.total_recv.items()
+                    ],
+                )
             except Exception:
                 return
