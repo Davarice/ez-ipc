@@ -87,7 +87,7 @@ class Remote:
         self.hook_request("RSA.CONF", cb_rsa_confirm)
 
     async def rsa_initiate(self):
-        if self.connection.box:
+        if not self.connection.can_encrypt or self.connection.box:
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.

@@ -96,6 +96,16 @@ class Server:
         self.total_recv.update(remote.total_recv)
         self.remotes.remove(remote)
 
+    async def encrypt_remote(self, remote):
+        echo("info", "Starting Secure Connection with {}...".format(remote))
+        try:
+            if await asyncio.wait_for(remote.rsa_initiate(), 10):
+                echo("win", "Secure Connection established with {}.".format(remote))
+            else:
+                warn("Failed to establish Secure Connection with {}.".format(remote))
+        except asyncio.TimeoutError:
+            warn("Failed to establish Secure Connection with {}.".format(remote))
+
     async def kill(self):
         for remote in self.remotes:
             await remote.terminate()
@@ -128,11 +138,18 @@ class Server:
             "diff",
             "Client at {} has been assigned UUID {}.".format(remote.host, remote.id),
         )
+
+        rsa = self.eventloop.create_task(self.encrypt_remote(remote))
         try:
             await remote.loop()
         except:
             err("Connection to {} closed.")
+
         finally:
+            try:
+                await asyncio.wait_for(rsa, 3)
+            except asyncio.TimeoutError:
+                pass
             self.drop(remote)
 
     async def run(self, loop=None):
