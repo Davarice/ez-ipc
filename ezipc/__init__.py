@@ -38,14 +38,14 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
 
             # Send a Ping Request to the Server. Send the Callback by keyword
             #   arg so that it will be called as soon as the Future is ready.
-            pongs.append(await _client.remote.request("PING", [i], receive))
+            pongs.append(
+                asyncio.create_task(
+                    _client.remote.request_wait(
+                        "PING", [i], callback=receive, timeout=4
+                    )
+                )
+            )
 
-        # print(pongs)
-
-        # After the final line of the final Coroutine, the Client will end. One
-        #   should take care that time is allotted to receive any Responses that
-        #   may still be en route, unless one can be sure they are unimportant.
-        await asyncio.sleep(1)
         try:
             await asyncio.gather(*pongs)
             echo("info", "Successfuly ran {} Pings.".format(len(pongs)))

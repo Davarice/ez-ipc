@@ -328,6 +328,33 @@ class Remote:
         finally:
             return future
 
+    async def request_wait(
+        self, meth: str, *a, timeout=10, raise_remote_err=False, **kw
+    ):
+        """Send a JSON-RPC Request with the given data, the same as
+            `Remote.request()`. However, rather than return the Future, handle
+            it, and return None if the request timed out or (unless specified)
+            yielded an Error Response.
+        """
+        future = await self.request(meth, *a, **kw)
+        try:
+            if timeout > 0:
+                await asyncio.wait_for(future, timeout)
+            else:
+                await future
+
+        except RemoteError as e:
+            if raise_remote_err:
+                raise e
+            else:
+                return None
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            warn("{} Request timed out.".format(meth))
+            return None
+
+        else:
+            return future.result()
+
     async def respond(
         self, mid: str, method=None, *, err=None, res=None, nohandle=False
     ):
