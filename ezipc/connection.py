@@ -17,30 +17,35 @@ class Connection:
         self.instr: asyncio.StreamReader = instr
         self.outstr: asyncio.StreamWriter = outstr
 
-        self._key = PrivateKey.generate() if can_encrypt else None
+        self.can_encrypt = can_encrypt
+
+        self._key = PrivateKey.generate() if self.can_encrypt else None
         self.key_other = None
         self._box = None
         self.box = None
 
     @property
     def key(self):
-        return self._key.public_key if can_encrypt else None
+        return bytes(self._key.public_key).hex() if self.can_encrypt else None
 
-    def add_key(self, pubkey: bytes):
-        if can_encrypt:
-            self.key_other = PublicKey(pubkey)
-            self._box = Box(self.key, self.key_other)
+    def add_key(self, pubkey: str):
+        if pubkey and self.can_encrypt:
+            self.key_other = PublicKey(bytes.fromhex(pubkey))
+            self._box = Box(self._key, self.key_other)
 
     def begin_encryption(self):
         self.box = self._box
 
-    def decrypt(self, data):
+    def can_activate(self):
+        return bool(self._box and not self.box)
+
+    def _decrypt(self, data):
         if self.box:
             return self.box.decrypt(data)
         else:
             return data
 
-    def encrypt(self, data):
+    def _encrypt(self, data):
         if self.box:
             return self.box.encrypt(data)
         else:
@@ -48,17 +53,17 @@ class Connection:
 
     async def readline(self):
         data = self.instr.readline()
-        return self.decrypt(data)
+        return self._decrypt(data)
 
     async def readuntil(self, *a, **kw):
         data = self.instr.readuntil(*a, **kw)
-        return self.decrypt(data)
+        return self._decrypt(data)
 
     async def read(self, *a, **kw):
         data = self.instr.read(*a, **kw)
-        return self.decrypt(data)
+        return self._decrypt(data)
 
     async def write(self, data: bytes):
-        self.outstr.write(self.encrypt(data))
+        self.outstr.write(data)
         self.outstr.write(b"\n")
         await self.outstr.drain()
