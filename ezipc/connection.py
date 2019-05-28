@@ -1,4 +1,4 @@
-import asyncio
+from asyncio import StreamReader, StreamWriter
 
 try:
     import nacl.utils
@@ -13,16 +13,16 @@ else:
 
 
 class Connection:
-    def __init__(self, instr: asyncio.StreamReader, outstr: asyncio.StreamWriter):
-        self.instr: asyncio.StreamReader = instr
-        self.outstr: asyncio.StreamWriter = outstr
+    def __init__(self, instr: StreamReader, outstr: StreamWriter):
+        self.instr: StreamReader = instr
+        self.outstr: StreamWriter = outstr
 
         self.can_encrypt = can_encrypt
 
-        self._key = PrivateKey.generate() if self.can_encrypt else None
-        self.key_other = None
-        self._box = None
-        self.box = None
+        self._key: PrivateKey = PrivateKey.generate() if self.can_encrypt else None
+        self.key_other: PublicKey = None
+        self._box: Box = None
+        self.box: Box = None
 
     @property
     def key(self):

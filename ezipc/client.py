@@ -1,4 +1,12 @@
-import asyncio
+from asyncio import (
+    AbstractEventLoop,
+    CancelledError,
+    get_running_loop,
+    open_connection,
+    Task,
+    TimeoutError,
+    wait_for,
+)
 from datetime import datetime as dt
 
 from .common import Remote
@@ -17,14 +25,14 @@ class Client:
     """
 
     def __init__(self, addr: str = "127.0.0.1", port: int = 9002):
-        self.addr = addr
-        self.port = port
+        self.addr: str = addr
+        self.port: int = port
 
-        self.eventloop = None
-        self.remote = None
-        self.listening = None
+        self.eventloop: AbstractEventLoop = None
+        self.remote: Remote = None
+        self.listening: Task = None
 
-        self.startup = dt.utcnow()
+        self.startup: dt = dt.utcnow()
 
     @property
     def alive(self):
@@ -43,12 +51,12 @@ class Client:
                 P.startup = self.startup
                 echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
 
-    async def connect(self, loop, timeout=10):
+    async def connect(self, loop, timeout=10) -> bool:
         try:
-            streams = await asyncio.wait_for(
-                asyncio.open_connection(self.addr, self.port, loop=loop), timeout
+            streams = await wait_for(
+                open_connection(self.addr, self.port, loop=loop), timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             err("Connection timed out after {}s.".format(timeout))
             return False
         except ConnectionRefusedError:
@@ -73,7 +81,7 @@ class Client:
         if self.listening:
             if not self.listening.done():
                 self.listening.cancel()
-            self.listening = None
+            self.listening: Task = None
 
         if self.alive:
             try:
@@ -90,12 +98,12 @@ class Client:
         except:
             err("Skipping niceties.")
 
-    async def run_through(self, *coros, loop=None):
+    async def run_through(self, *coros, loop: AbstractEventLoop = None):
         """Construct a Coroutine that will sequentially run an arbitrary number
             of other Coroutines, passed to this method. Then, run the newly
             constructed Coroutine, while listening.
         """
-        loop = loop or asyncio.get_running_loop()
+        loop: AbstractEventLoop = loop or get_running_loop()
 
         async def run():
             for coro in coros:
@@ -105,7 +113,7 @@ class Client:
             if await self.connect(loop):
                 await run()
 
-        except asyncio.CancelledError:
+        except CancelledError:
             err("CANCELLED. Client closing...")
             await self.terminate("Coroutine Cancelled")
 

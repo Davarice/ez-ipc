@@ -27,14 +27,14 @@ try:
 
     init()
 except ImportError:
-    init = None
+    init = lambda: None
     Fore = Fake
 
-Color = None
+Color = Fore
 prefices = {}
 
 
-def set_colors(use_real):
+def set_colors(use_real: bool):
     global Color
     global prefices
 
@@ -58,11 +58,12 @@ set_colors(True)
 
 
 class _Printer:
-    def __init__(self, verbosity=2):
-        self.verbosity = verbosity
-        self.startup = dt.utcnow()
+    def __init__(self, verbosity: int = 2):
+        self.output_line = print
+        self.startup: dt = dt.utcnow()
+        self.verbosity: int = verbosity
 
-    def emit(self, etype, text, color=None):
+    def emit(self, etype: str, text: str, color: str = ""):
         p_color, prefix, pri = prefices.get(etype) or (Color.WHITE, etype, 4)
         if pri <= self.verbosity:
             self.output_line(
@@ -75,9 +76,6 @@ class _Printer:
                     (color or Color.RESET) + str(text) + Color.RESET,
                 )
             )
-
-    def output_line(self, line):
-        print(line)
 
 
 P = _Printer()

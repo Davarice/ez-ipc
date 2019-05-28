@@ -1,4 +1,14 @@
-import asyncio
+from asyncio import (
+    AbstractEventLoop,
+    get_event_loop,
+    run,
+    StreamReader,
+    start_server,
+    AbstractServer,
+    StreamWriter,
+    TimeoutError,
+    wait_for,
+)
 from collections import Counter
 from datetime import datetime as dt
 from typing import Union
@@ -24,16 +34,17 @@ class Server:
         elif not addr:
             addr = "127.0.0.1"
 
-        self.addr = addr
-        self.port = port
+        self.addr: str = addr
+        self.port: int = port
 
-        self.eventloop = None
-        self.remotes = set()
-        self.server = None
-        self.startup = dt.utcnow()
-        self.total_clients = 0
-        self.total_sent = Counter(notif=0, request=0, response=0)
-        self.total_recv = Counter(notif=0, request=0, response=0)
+        self.eventloop: AbstractEventLoop = None
+        self.remotes: set = set()
+        self.server: AbstractServer = None
+        self.startup: dt = dt.utcnow()
+
+        self.total_clients: int = 0
+        self.total_sent: Counter = Counter(notif=0, request=0, response=0)
+        self.total_recv: Counter = Counter(notif=0, request=0, response=0)
 
         self.hooks_notif = {}
         self.hooks_request = {}
@@ -88,24 +99,24 @@ class Server:
 
         for remote_, request in reqs:
             try:
-                await asyncio.wait_for(request, 10)
+                await wait_for(request, 10)
             except Exception:
                 warn("{} timed out.".format(remote_))
                 self.drop(remote_)
 
-    def drop(self, remote):
+    def drop(self, remote: Remote):
         self.total_sent.update(remote.total_sent)
         self.total_recv.update(remote.total_recv)
         self.remotes.remove(remote)
 
-    async def encrypt_remote(self, remote):
+    async def encrypt_remote(self, remote: Remote):
         echo("info", "Starting Secure Connection with {}...".format(remote))
         try:
-            if await asyncio.wait_for(remote.rsa_initiate(), 10):
+            if await wait_for(remote.rsa_initiate(), 10):
                 echo("win", "Secure Connection established with {}.".format(remote))
             else:
                 warn("Failed to establish Secure Connection with {}.".format(remote))
-        except asyncio.TimeoutError:
+        except TimeoutError:
             warn("Failed to establish Secure Connection with {}.".format(remote))
 
     async def kill(self):
@@ -117,9 +128,7 @@ class Server:
             await self.server.wait_closed()
         echo("dcon", "Server closed.")
 
-    async def open_connection(
-        self, str_in: asyncio.StreamReader, str_out: asyncio.StreamWriter
-    ):
+    async def open_connection(self, str_in: StreamReader, str_out: StreamWriter):
         """Callback executed by AsyncIO when a Client contacts the Server."""
         echo(
             "con",
@@ -149,8 +158,8 @@ class Server:
 
         finally:
             try:
-                await asyncio.wait_for(rsa, 3)
-            except asyncio.TimeoutError:
+                await wait_for(rsa, 3)
+            except TimeoutError:
                 pass
             self.drop(remote)
 
@@ -159,10 +168,10 @@ class Server:
             in instances where other things must be done, and the Server needs
             to be run properly asynchronously.
         """
-        self.eventloop = loop or asyncio.get_event_loop()
+        self.eventloop = loop or get_event_loop()
 
         echo("info", "Running Server on {}:{}".format(self.addr, self.port))
-        self.server = await asyncio.start_server(
+        self.server = await start_server(
             self.open_connection, self.addr, self.port, loop=self.eventloop
         )
         echo("win", "Ready to begin accepting Requests.")
@@ -175,7 +184,7 @@ class Server:
         self._setup(*a, **kw)
 
         try:
-            asyncio.run(self.run())
+            run(self.run())
         except KeyboardInterrupt:
             err("INTERRUPTED. Server closing...")
         except Exception as e:
@@ -201,6 +210,6 @@ class Server:
                 ],
             )
             try:
-                asyncio.run(self.kill())
+                run(self.kill())
             except Exception:
                 return

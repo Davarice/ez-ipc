@@ -1,11 +1,23 @@
 """Module defining a superclass with methods common to Clients and Servers."""
 
-import asyncio
+from asyncio import (
+    AbstractEventLoop,
+    CancelledError,
+    create_task,
+    Future,
+    gather,
+    IncompleteReadError,
+    StreamReader,
+    StreamWriter,
+    Task,
+    TimeoutError,
+    wait_for,
+)
 from collections import Counter
 from datetime import datetime as dt
 from functools import partial
 from json import JSONDecodeError
-from typing import Union
+from typing import Dict, List, Union
 from uuid import uuid4
 
 from . import protocol
@@ -16,44 +28,44 @@ from .output import echo, err as err_, warn
 
 class Remote:
     def __init__(self, eventloop, instr, outstr, group: set = None):
-        self.eventloop: asyncio.AbstractEventLoop = eventloop
-        self.instr = instr
-        self.outstr = outstr
+        self.eventloop: AbstractEventLoop = eventloop
+        self.instr: StreamReader = instr
+        self.outstr: StreamWriter = outstr
         self.connection = Connection(instr, outstr)
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
         self.hooks_notif = {}  # {"method": function()}
         self.hooks_request = {}  # {"method": function()}
 
-        self.futures = {}  # {"uuid": asyncio.Future}
-        self.tasks = []
-        self.total_sent = Counter(notif=0, request=0, response=0)
-        self.total_recv = Counter(notif=0, request=0, response=0)
+        self.futures: Dict[str, Future] = {}
+        self.tasks: List[Task] = []
+        self.total_sent: Counter = Counter(notif=0, request=0, response=0)
+        self.total_recv: Counter = Counter(notif=0, request=0, response=0)
 
-        self.group = group
-        self.id = hex(
+        self.group: set = group
+        self.id: str = hex(
             (uuid4().int + self.port + sum([int(s) for s in self.addr.split(".")]))
             % 16 ** 3
         )[2:]
 
         now = dt.utcnow()
-        self.opened = now
-        self.startup = now
+        self.opened: dt = now
+        self.startup: dt = now
         self._add_default_hooks()
 
     @property
-    def host(self):
+    def host(self) -> str:
         return "{}:{}".format(self.addr, self.port)
 
     @property
-    def is_secure(self):
+    def is_secure(self) -> bool:
         return bool(self.connection.can_encrypt and self.connection.box)
 
     def __str__(self):
         return "Remote " + self.id
 
     def _add_default_hooks(self):
-        async def cb_ping(data, remote: Remote):
+        async def cb_ping(data: dict, remote: Remote):
             await remote.respond(
                 data["id"],
                 data["method"],
@@ -62,7 +74,7 @@ class Remote:
 
         self.hook_request("PING", cb_ping)
 
-        async def cb_rsa_exchange(data, remote: Remote):
+        async def cb_rsa_exchange(data: dict, remote: Remote):
             if remote.connection.can_encrypt:
                 echo(
                     "info",
@@ -81,7 +93,7 @@ class Remote:
 
         self.hook_request("RSA.EXCH", cb_rsa_exchange)
 
-        async def cb_rsa_confirm(data, remote: Remote):
+        async def cb_rsa_confirm(data: dict, remote: Remote):
             if remote.connection.can_activate():
                 await remote.respond(data["id"], data["method"], res=[True])
                 remote.connection.begin_encryption()
@@ -89,7 +101,7 @@ class Remote:
 
         self.hook_request("RSA.CONF", cb_rsa_confirm)
 
-    async def rsa_initiate(self):
+    async def rsa_initiate(self) -> bool:
         if not self.connection.can_encrypt or self.connection.box:
             return False
         else:
@@ -112,7 +124,7 @@ class Remote:
                 # Something went wrong. Do NOT switch to encryption.
                 return False
 
-    async def get_line(self, until=b"\n"):
+    async def get_line(self, until: bytes = b"\n") -> bytes:
         line: bytes = await self.instr.readuntil(until)
         if line == b"":
             raise ConnectionResetError("Stream closed by remote host.")
@@ -121,7 +133,7 @@ class Remote:
         else:
             return line
 
-    async def process_line(self, line):
+    async def process_line(self, line: bytes):
         try:
             data = protocol.unpack(line)
         except JSONDecodeError as e:
@@ -140,7 +152,7 @@ class Remote:
             mid = data["id"]
             if mid in self.futures:
                 # Something is waiting for this message.
-                future: asyncio.Future = self.futures[mid]
+                future: Future = self.futures[mid]
                 del self.futures[mid]
 
                 if future.done():
@@ -182,7 +194,7 @@ class Remote:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
                 # await func(data, self)
-                tsk = asyncio.create_task(func(data, self))
+                tsk = create_task(func(data, self))
                 self.tasks.append(tsk)
             else:
                 # We have no hook for this method; Return an Error.
@@ -205,7 +217,7 @@ class Remote:
             elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
-                self.tasks.append(asyncio.ensure_future(func(data, self)))
+                self.tasks.append(create_task(func(data, self)))
 
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
@@ -228,7 +240,7 @@ class Remote:
         """
         self.hooks_request[method] = func
 
-    def hook_response(self, uuid: str, future: asyncio.Future):
+    def hook_response(self, uuid: str, future: Future):
         """Signal to the Remote that `future` is waiting for a Response with an ID
             field of `uuid`.
         """
@@ -252,10 +264,10 @@ class Remote:
         try:
             while True:
                 await self.process_line(await self.get_line())
-                tasks = asyncio.gather(*self.tasks)
+                tasks = gather(*self.tasks)
                 self.tasks = []
                 await tasks
-        except asyncio.IncompleteReadError:
+        except IncompleteReadError:
             err_("Connection with {} cut off.".format(self))
         except EOFError:
             err_("Connection with {} failed: Stream ended.".format(self))
@@ -263,13 +275,13 @@ class Remote:
         except ConnectionError as e:
             echo("dcon", "Connection with {} closed: {}".format(self, e))
             self.close()
-        except asyncio.CancelledError:
+        except CancelledError:
             # err_("Listening to {} was cancelled.".format(self))
             pass
         except Exception as e:
             err_("Connection with {} failed:".format(self), e)
 
-    async def notif(self, meth: str, params=None, nohandle=False):
+    async def notif(self, meth: str, params: Union[dict, list] = None, nohandle=False):
         """Assemble and send a JSON-RPC Notification with the given data."""
         try:
             echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
@@ -292,7 +304,7 @@ class Remote:
         *,
         callback=None,
         nohandle=False
-    ) -> asyncio.Future:
+    ) -> Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
         """
@@ -307,7 +319,7 @@ class Remote:
             data, mid = protocol.make_request(meth)
 
         # Create a Future which will represent the Response.
-        future: asyncio.Future = self.eventloop.create_future()
+        future: Future = self.eventloop.create_future()
         self.hook_response(mid, future)
 
         if callback:
@@ -342,7 +354,7 @@ class Remote:
         future = await self.request(meth, params, callback=callback, nohandle=nohandle)
         try:
             if timeout > 0:
-                await asyncio.wait_for(future, timeout)
+                await wait_for(future, timeout)
             else:
                 await future
 
@@ -351,7 +363,7 @@ class Remote:
                 raise e
             else:
                 return default
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, CancelledError):
             warn("{} Request timed out.".format(meth))
             return default
 
@@ -359,7 +371,13 @@ class Remote:
             return future.result()
 
     async def respond(
-        self, mid: str, method=None, *, err=None, res=None, nohandle=False
+        self,
+        mid: str,
+        method: str = None,
+        *,
+        err: dict = None,
+        res: Union[dict, list] = None,
+        nohandle=False
     ):
         echo(
             "send",

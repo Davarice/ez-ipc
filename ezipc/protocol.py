@@ -5,7 +5,7 @@ https://www.jsonrpc.org/specification
 """
 
 import json
-from typing import Tuple
+from typing import Tuple, Union
 from uuid import uuid4
 
 
@@ -34,7 +34,7 @@ def _id_new() -> str:
     return uuid4().hex
 
 
-def check_version(v: str):
+def check_version(v: str) -> bool:
     return v == __version__
 
 
@@ -106,7 +106,7 @@ def make_request(*args, **kwargs) -> Tuple[bytes, str]:
     return json.dumps(req, **JSON_OPTS).encode("utf-8"), mid
 
 
-def make_response(mid: str, res=None, err: dict = None) -> bytes:
+def make_response(mid: str, res: Union[dict, list]=None, err: dict = None) -> bytes:
     """Make a Response, to be sent in reply to a Request.
 
     Contains:
