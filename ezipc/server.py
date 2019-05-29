@@ -43,8 +43,8 @@ class Server:
         self.startup: dt = dt.utcnow()
 
         self.total_clients: int = 0
-        self.total_sent: Counter = Counter(notif=0, request=0, response=0)
-        self.total_recv: Counter = Counter(notif=0, request=0, response=0)
+        self.total_sent: Counter = Counter(byte=0, notif=0, request=0, response=0)
+        self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
 
         self.hooks_notif = {}
         self.hooks_request = {}
@@ -112,7 +112,7 @@ class Server:
     async def encrypt_remote(self, remote: Remote):
         echo("info", "Starting Secure Connection with {}...".format(remote))
         try:
-            if await wait_for(remote.rsa_initiate(), 10):
+            if await wait_for(remote.enable_rsa(), 10):
                 echo("win", "Secure Connection established with {}.".format(remote))
             else:
                 warn("Failed to establish Secure Connection with {}.".format(remote))
@@ -153,8 +153,6 @@ class Server:
         rsa = self.eventloop.create_task(self.encrypt_remote(remote))
         try:
             await remote.loop()
-        except:
-            err("Connection to {} closed.")
 
         finally:
             try:

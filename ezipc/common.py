@@ -21,7 +21,7 @@ from typing import Dict, List, Union
 from uuid import uuid4
 
 from . import protocol
-from .connection import Connection
+from .connection import Connection, CryptoError
 from .exc import RemoteError
 from .output import echo, err as err_, warn
 
@@ -39,8 +39,8 @@ class Remote:
 
         self.futures: Dict[str, Future] = {}
         self.tasks: List[Task] = []
-        self.total_sent: Counter = Counter(notif=0, request=0, response=0)
-        self.total_recv: Counter = Counter(notif=0, request=0, response=0)
+        self.total_sent: Counter = Counter(byte=0, notif=0, request=0, response=0)
+        self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
 
         self.group: set = group
         self.id: str = hex(
@@ -69,7 +69,7 @@ class Remote:
             await remote.respond(
                 data["id"],
                 data["method"],
-                res={"method": "PONG", "params": data.get("params", None)},
+                res={"method": "PONG", "result": data.get("params", None)},
             )
 
         self.hook_request("PING", cb_ping)
@@ -101,7 +101,7 @@ class Remote:
 
         self.hook_request("RSA.CONF", cb_rsa_confirm)
 
-    async def rsa_initiate(self) -> bool:
+    async def enable_rsa(self) -> bool:
         if not self.connection.can_encrypt or self.connection.box:
             return False
         else:
@@ -124,16 +124,14 @@ class Remote:
                 # Something went wrong. Do NOT switch to encryption.
                 return False
 
-    async def get_line(self, until: bytes = b"\n") -> bytes:
-        line: bytes = await self.instr.readuntil(until)
+    async def get_line(self) -> str:
+        line: str = await self.connection.read()
         if line == b"":
             raise ConnectionResetError("Stream closed by remote host.")
-        elif line[-1] != ord(until):
-            raise EOFError("Line ended early.")
         else:
             return line
 
-    async def process_line(self, line: bytes):
+    async def process_line(self, line: str):
         try:
             data = protocol.unpack(line)
         except JSONDecodeError as e:
@@ -222,10 +220,10 @@ class Remote:
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.
-            echo("", "Received an invalid Request from {}".format(self))
+            echo("", "Received an invalid Message from {}".format(self))
             if "id" in data:
                 await self.respond(
-                    data["id"], err=protocol.Errors.invalid_request(list(data.keys()))
+                    data["id"], err=protocol.Errors.invalid_request(keys)
                 )
 
     def hook_notif(self, method: str, func):
@@ -247,26 +245,34 @@ class Remote:
         self.futures[uuid] = future
 
     def close(self):
+        self.total_recv["byte"] = self.connection.total_recv
+        self.total_sent["byte"] = self.connection.total_sent
+
         for coro in self.tasks:
             # Cancel all running Tasks.
             if coro:
                 coro.cancel()
+
         if self.group is not None and self in self.group:
             # Remove self from Client Set, if possible.
             self.group.remove(self)
+
         if self.outstr.can_write_eof() and not self.outstr.is_closing():
             # Send an EOF, if possible.
             self.outstr.write_eof()
+
         # Finally, close the Stream.
         self.outstr.close()
 
     async def loop(self):
         try:
             while True:
-                await self.process_line(await self.get_line())
-                tasks = gather(*self.tasks)
-                self.tasks = []
-                await tasks
+                try:
+                    line = await self.get_line()
+                except CryptoError as e:
+                    warn("Decryption from {} failed: {} - {}".format(self, type(e).__name__, e))
+                else:
+                    await self.process_line(line)
         except IncompleteReadError:
             err_("Connection with {} cut off.".format(self))
         except EOFError:
@@ -280,6 +286,14 @@ class Remote:
             pass
         except Exception as e:
             err_("Connection with {} failed:".format(self), e)
+        finally:
+            try:
+                tasks = gather(*self.tasks)
+                self.tasks = []
+                await tasks
+            finally:
+                self.total_recv["byte"] = self.connection.total_recv
+                self.total_sent["byte"] = self.connection.total_sent
 
     async def notif(self, meth: str, params: Union[dict, list] = None, nohandle=False):
         """Assemble and send a JSON-RPC Notification with the given data."""
@@ -399,8 +413,8 @@ class Remote:
             if nohandle:
                 raise e
 
-    async def send(self, data: bytes):
-        await self.connection.write(data)
+    async def send(self, data: str):
+        print("Sent {} bytes.".format(await self.connection.write(data)))
 
     async def terminate(self, reason: str = None):
         try:

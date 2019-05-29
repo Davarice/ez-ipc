@@ -39,17 +39,16 @@ class Client:
         return bool(self.remote and not self.remote.outstr.is_closing())
 
     async def _add_hooks(self):
-        response = await self.remote.request("TIME")
-        await response
+        response = await self.remote.request_wait("TIME")
 
-        if response.cancelled() or response.exception():
-            warn("Failed to get Server Uptime.")
-        else:
-            ts = response.result().get("startup", 0)
+        if response:
+            ts = response.get("startup", 0)
             if ts:
                 self.startup = dt.fromtimestamp(ts)
                 P.startup = self.startup
                 echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
+        else:
+            warn("Failed to get Server Uptime.")
 
     async def connect(self, loop, timeout=10) -> bool:
         try:

@@ -78,7 +78,7 @@ class Errors:
         return cls.new(-32603, "Internal error", data)
 
 
-def make_notif(*args, **kwargs) -> bytes:
+def make_notif(*args, **kwargs) -> str:
     """Make a Notification, to be sent without expectation of a Response.
 
     Contains:
@@ -90,10 +90,10 @@ def make_notif(*args, **kwargs) -> bytes:
     """
     req = _make(*args, **kwargs)
 
-    return json.dumps(req, **JSON_OPTS).encode("utf-8")
+    return json.dumps(req, **JSON_OPTS)
 
 
-def make_request(*args, **kwargs) -> Tuple[bytes, str]:
+def make_request(*args, **kwargs) -> Tuple[str, str]:
     """Make a Request, a message that will yield a Response.
 
     Contains ALL fields documented in `make_notif` above, PLUS:
@@ -103,10 +103,10 @@ def make_request(*args, **kwargs) -> Tuple[bytes, str]:
     mid = _id_new()
     req["id"] = mid
 
-    return json.dumps(req, **JSON_OPTS).encode("utf-8"), mid
+    return json.dumps(req, **JSON_OPTS), mid
 
 
-def make_response(mid: str, res: Union[dict, list]=None, err: dict = None) -> bytes:
+def make_response(mid: str, res: Union[dict, list]=None, err: dict = None) -> str:
     """Make a Response, to be sent in reply to a Request.
 
     Contains:
@@ -131,10 +131,10 @@ def make_response(mid: str, res: Union[dict, list]=None, err: dict = None) -> by
         raise ValueError("Response MUST be provided either a Result or an Error.")
     resp["id"] = mid
 
-    return json.dumps(resp, **JSON_OPTS).encode("utf-8")
+    return json.dumps(resp, **JSON_OPTS)
 
 
-def unpack(data: bytes) -> dict:
+def unpack(data: str) -> dict:
     return json.loads(data)
 
 

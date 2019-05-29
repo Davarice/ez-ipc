@@ -2,14 +2,21 @@ from asyncio import StreamReader, StreamWriter
 
 try:
     import nacl.utils
+    from nacl.exceptions import CryptoError
     from nacl.public import Box, PrivateKey, PublicKey
 except ImportError:
+    class CryptoError(Exception):
+        pass
+
     Box = None
     PrivateKey = None
     PublicKey = None
     can_encrypt = False
 else:
     can_encrypt = True
+
+
+sep = b"\n"*5
 
 
 class Connection:
@@ -24,6 +31,9 @@ class Connection:
         self._box: Box = None
         self.box: Box = None
 
+        self.total_sent = 0
+        self.total_recv = 0
+
     @property
     def key(self):
         return bytes(self._key.public_key).hex() if self.can_encrypt else None
@@ -36,34 +46,35 @@ class Connection:
     def begin_encryption(self):
         self.box = self._box
 
-    def can_activate(self):
+    def can_activate(self) -> bool:
         return bool(self._box and not self.box)
 
-    def _decrypt(self, data):
+    def _decrypt(self, ctext: bytes) -> bytes:
         if self.box:
-            return self.box.decrypt(data)
+            return self.box.decrypt(ctext)
         else:
-            return data
+            return ctext
 
-    def _encrypt(self, data):
+    def _encrypt(self, ptext: bytes) -> bytes:
         if self.box:
-            return self.box.encrypt(data)
+            return self.box.encrypt(ptext)
         else:
-            return data
+            return ptext
 
-    async def readline(self):
-        data = self.instr.readline()
-        return self._decrypt(data)
+    async def read(self) -> str:
+        ctext: bytes = await self.instr.readuntil(sep)
+        print(repr(ctext.hex()))
+        self.total_recv += len(ctext)
+        ptext: str = self._decrypt(ctext[:-len(sep)])
+        return ptext
 
-    async def readuntil(self, *a, **kw):
-        data = self.instr.readuntil(*a, **kw)
-        return self._decrypt(data)
+    async def write(self, ptext: str) -> int:
+        ctext: bytes = self._encrypt(ptext.encode())
+        self.outstr.write(ctext)
+        self.outstr.write(sep)
 
-    async def read(self, *a, **kw):
-        data = self.instr.read(*a, **kw)
-        return self._decrypt(data)
+        count = len(ctext) + len(sep)
+        self.total_sent += count
 
-    async def write(self, data: bytes):
-        self.outstr.write(data)
-        self.outstr.write(b"\n")
         await self.outstr.drain()
+        return count
