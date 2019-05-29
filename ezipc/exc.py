@@ -25,7 +25,23 @@ class RemoteError(EZError):
             #   return one anyway.
             return cls(errdat["code"], errdat["message"], errdat["data"], data["id"])
 
+    @property
+    def code(self):
+        return self.args[0]
+
+    @property
+    def message(self):
+        return self.args[1]
+
+    @property
+    def data(self):
+        return self.args[2]
+
+    @property
+    def id(self):
+        return self.args[3]
+
     def __str__(self):
         return "Error {}: {}: {} (ID: {})".format(
-            self.args[0], self.args[1], repr(self.args[2]), self.args[3]
+            self.code, self.message, repr(self.data), self.id
         )
