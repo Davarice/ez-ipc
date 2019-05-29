@@ -40,6 +40,7 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
                     )
                 )
             )
+        await asyncio.sleep(1)
         pongs.append(
             asyncio.create_task(
                 _client.remote.request_wait("PING", None, callback=receive, timeout=4)
@@ -47,8 +48,10 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
         )
 
         try:
-            await asyncio.gather(*pongs)
-            echo("info", "Successfuly ran {} Pings.".format(len(pongs)))
+            res = await asyncio.gather(asyncio.sleep(1), *pongs, return_exceptions=True)
+            total = len(pongs)
+            win = total - res[1:].count(None)
+            echo("info", "Successfuly ran {}/{} Pings.".format(win, total))
         except Exception as e:
             err("Failed to run Pings:", e)
 

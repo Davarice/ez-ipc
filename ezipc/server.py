@@ -205,7 +205,12 @@ class Server:
             run(self.terminate())
         finally:
             try:
-                echo("info", "Served {} Clients.".format(self.total_clients))
+                echo(
+                    "info",
+                    "Served {} Clients in {}.".format(
+                        self.total_clients, str(dt.utcnow() - self.startup)[:-7]
+                    ),
+                )
                 echo("info", "Sent:")
                 echo(
                     "tab",
