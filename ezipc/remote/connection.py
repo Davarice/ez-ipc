@@ -25,6 +25,7 @@ class Connection:
         self.outstr: StreamWriter = outstr
 
         self.can_encrypt = can_encrypt
+        self.open = True
 
         self._key: PrivateKey = PrivateKey.generate() if self.can_encrypt else None
         self.key_other: PublicKey = None
@@ -37,6 +38,17 @@ class Connection:
     @property
     def key(self):
         return bytes(self._key.public_key).hex() if self.can_encrypt else None
+
+    def close(self):
+        self.open = False
+
+        if not self.outstr.is_closing():
+            if self.outstr.can_write_eof():
+                # Send an EOF, if possible.
+                self.outstr.write_eof()
+
+            # Close the Stream.
+            self.outstr.close()
 
     def add_key(self, pubkey: str):
         if pubkey and self.can_encrypt:
@@ -84,7 +96,7 @@ class Connection:
     async def __anext__(self):
         try:
             line: str = await self.read()
-            if line:
+            if line and self.open:
                 return line
             else:
                 raise StopAsyncIteration

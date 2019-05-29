@@ -10,6 +10,7 @@ from asyncio import (
     Future,
     gather,
     IncompleteReadError,
+    Queue,
     StreamReader,
     StreamWriter,
     Task,
@@ -50,6 +51,7 @@ class Remote:
         self.hooks_request = {}  # {"method": function()}
 
         self.futures: Dict[str, Future] = {}
+        self.lines: Queue = Queue()
         self.total_sent: Counter = Counter(byte=0, notif=0, request=0, response=0)
         self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
 
@@ -71,6 +73,10 @@ class Remote:
     @property
     def is_secure(self) -> bool:
         return bool(self.connection.can_encrypt and self.connection.box)
+
+    @property
+    def open(self) -> bool:
+        return self.connection.open
 
     def __str__(self):
         return "Remote " + self.id
@@ -248,57 +254,72 @@ class Remote:
     def close(self):
         self.total_recv["byte"] = self.connection.total_recv
         self.total_sent["byte"] = self.connection.total_sent
-
-        # for coro in self.tasks:
-        #     # Cancel all running Tasks.
-        #     if coro:
-        #         coro.cancel()
+        self.connection.close()
 
         if self.group is not None and self in self.group:
             # Remove self from Client Set, if possible.
             self.group.remove(self)
 
-        if self.outstr.can_write_eof() and not self.outstr.is_closing():
-            # Send an EOF, if possible.
-            self.outstr.write_eof()
+    async def helper(self, queue: Queue):
+        while True:
+            line = await queue.get()
+            tasks: List[Task] = []
 
-        # Finally, close the Stream.
-        self.outstr.close()
+            try:
+                await self.process_line(line, tasks)
+            except ConnectionError as e:
+                if self.open:
+                    self.close()
+                    echo("dcon", "Connection with {} closed: {}".format(self, e))
+            finally:
+                await gather(*tasks)
+                queue.task_done()
 
     async def loop(self):
+
+        helpers = []
         try:
-            async for line in self.connection:
-                if isinstance(line, Exception):
+            for _ in range(3):
+                helpers.append(create_task(self.helper(self.lines)))
+
+            async for item in self.connection:
+                if isinstance(item, Exception):
                     warn(
                         "Decryption from {} failed: {} - {}".format(
-                            self, type(line).__name__, line
+                            self, type(item).__name__, item
                         )
                     )
                 else:
-                    tasks: List[Task] = []
-
-                    await self.process_line(line, tasks)
-                    await gather(*tasks)
+                    await self.lines.put(item)
 
         except IncompleteReadError:
-            err_("Connection with {} cut off.".format(self))
+            if self.open:
+                err_("Connection with {} cut off.".format(self))
         except EOFError:
-            err_("Connection with {} failed: Stream ended.".format(self))
-            self.close()
+            if self.open:
+                err_("Connection with {} failed: Stream ended.".format(self))
         except ConnectionError as e:
-            echo("dcon", "Connection with {} closed: {}".format(self, e))
-            self.close()
+            if self.open:
+                echo("dcon", "Connection with {} closed: {}".format(self, e))
         except CancelledError:
-            # err_("Listening to {} was cancelled.".format(self))
-            pass
+            if self.open:
+                err_("Listening to {} was cancelled.".format(self))
         except Exception as e:
-            err_("Connection with {} failed:".format(self), e)
+            if self.open:
+                err_("Connection with {} failed:".format(self), e)
+
         finally:
-            self.total_recv["byte"] = self.connection.total_recv
-            self.total_sent["byte"] = self.connection.total_sent
+            self.close()
+            for helper in helpers:
+                helper.cancel()
+
+            await gather(*helpers, return_exceptions=True)
 
     async def notif(self, meth: str, params: Union[dict, list] = None, nohandle=False):
         """Assemble and send a JSON-RPC Notification with the given data."""
+        if not self.open:
+            return
+
         try:
             echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
             self.total_sent["notif"] += 1
@@ -324,6 +345,13 @@ class Remote:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
         """
+        # Create a Future which will represent the Response.
+        future: Future = self.eventloop.create_future()
+
+        if not self.open:
+            future.set_exception(ConnectionResetError)
+            return future
+
         echo("send", "Sending a '{}' Request to {}.".format(meth, self))
         self.total_sent["request"] += 1
 
@@ -334,8 +362,6 @@ class Remote:
         else:
             data, mid = make_request(meth)
 
-        # Create a Future which will represent the Response.
-        future: Future = self.eventloop.create_future()
         self.futures[mid] = future
 
         if callback:
@@ -367,6 +393,9 @@ class Remote:
             it, and return None if the request timed out or (unless specified)
             yielded an Error Response.
         """
+        if not self.open:
+            return
+
         future = await self.request(meth, params, callback=callback, nohandle=nohandle)
         try:
             if timeout > 0:
@@ -395,6 +424,9 @@ class Remote:
         res: Union[dict, list] = None,
         nohandle=False
     ):
+        if not self.open:
+            return
+
         echo(
             "send",
             "Sending {}{} to {}.".format(
@@ -414,9 +446,15 @@ class Remote:
                 raise e
 
     async def send(self, data: str):
+        if not self.open:
+            return
+
         await self.connection.write(data)
 
     async def terminate(self, reason: str = None):
+        if not self.open:
+            return
+
         try:
             await self.notif("TERM", {"reason": reason}, nohandle=True)
         except Exception as e:
