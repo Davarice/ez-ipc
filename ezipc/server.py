@@ -11,6 +11,7 @@ from asyncio import (
 )
 from collections import Counter, Set
 from datetime import datetime as dt
+from socket import AF_INET, SOCK_DGRAM, socket
 from typing import Union
 
 from .remote import Remote
@@ -29,9 +30,19 @@ class Server:
 
     def __init__(self, addr: str = "", port: int = 9002, autopublish=False):
         if autopublish:
-            # TODO: Find the network address of this machine.
-            pass
-        elif not addr:
+            # Override the passed parameter and try to autofind the address.
+            sock = socket(AF_INET, SOCK_DGRAM)
+            try:
+                sock.connect(("10.255.255.255", 1))
+                addr = sock.getsockname()[0]
+            except (InterruptedError, OSError):
+                warn("Failed to autoconfigure IP address.")
+            finally:
+                sock.close()
+
+        if not addr:
+            # No Address specified, and autoconfig failed or was not enabled;
+            #   Fall back to localhost.
             addr = "127.0.0.1"
 
         self.addr: str = addr
