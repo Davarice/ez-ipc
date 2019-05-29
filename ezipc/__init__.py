@@ -56,7 +56,7 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
     eventloop = asyncio.get_event_loop()
 
     x = [
-        Client(addr, port).run_through(send_pings, send_pings, loop=eventloop)
+        Client(addr, port).run_through(send_pings, loop=eventloop)
         for _ in range(CLIENTS)
     ]
     # `run_through()` may take any number of Coroutines as Arguments. They will

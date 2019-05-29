@@ -418,7 +418,7 @@ class Remote:
                 raise e
 
     async def send(self, data: str):
-        print("Sent {} bytes.".format(await self.connection.write(data)))
+        await self.connection.write(data)
 
     async def terminate(self, reason: str = None):
         try:
