@@ -14,7 +14,7 @@ from datetime import datetime as dt
 from typing import Union
 
 from .common import Remote
-from .etc import future_callback
+from .etc import callback_response
 from .output import echo, err, warn
 
 
@@ -79,7 +79,7 @@ class Server:
         if not self.remotes:
             return
 
-        @future_callback
+        @callback_response
         def cb_confirm(data, remote):
             if data:
                 echo("tab", "Broadcast '{}' received by {}.".format(meth, remote))

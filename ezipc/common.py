@@ -69,7 +69,7 @@ class Remote:
             await remote.respond(
                 data["id"],
                 data["method"],
-                res={"method": "PONG", "result": data.get("params", None)},
+                res=data.get("params") or [None],
             )
 
         self.hook_request("PING", cb_ping)
@@ -238,12 +238,6 @@ class Remote:
         """
         self.hooks_request[method] = func
 
-    def hook_response(self, uuid: str, future: Future):
-        """Signal to the Remote that `future` is waiting for a Response with an ID
-            field of `uuid`.
-        """
-        self.futures[uuid] = future
-
     def close(self):
         self.total_recv["byte"] = self.connection.total_recv
         self.total_sent["byte"] = self.connection.total_sent
@@ -334,7 +328,7 @@ class Remote:
 
         # Create a Future which will represent the Response.
         future: Future = self.eventloop.create_future()
-        self.hook_response(mid, future)
+        self.futures[mid] = future
 
         if callback:
             cb = partial(callback, remote=self)

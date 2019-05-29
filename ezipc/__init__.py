@@ -1,6 +1,6 @@
 import asyncio
 
-from .etc import future_callback
+from .etc import callback_response
 from .output import echo, err, set_verbosity
 
 
@@ -15,17 +15,12 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
             will be caught by `run_through()`.
         """
 
-        @future_callback
+        @callback_response
         def receive(result, remote):
             """Response handler Function. Assigned to a Future, and called by
                 it when a Response with that UUID is received.
             """
-            echo(
-                "tab",
-                "PONG from {}: {}".format(
-                    remote, result.get("result") or result.get("error")
-                ),
-            )
+            echo("tab", "PONG from {}: {}".format(remote, result))
 
         echo("info", "Sending Requests...")
 
@@ -34,7 +29,7 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
         for i in ["aaaa", "zxcv", "qwert", "wysiwyg"]:
             await asyncio.sleep(1)
             if not _client.alive:
-                return
+                break
 
             # Send a Ping Request to the Server. Send the Callback by keyword
             #   arg so that it will be called as soon as the Future is ready.
@@ -45,6 +40,11 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
                     )
                 )
             )
+        pongs.append(
+            asyncio.create_task(
+                _client.remote.request_wait("PING", None, callback=receive, timeout=4)
+            )
+        )
 
         try:
             await asyncio.gather(*pongs)
@@ -56,14 +56,13 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
     eventloop = asyncio.get_event_loop()
 
     x = [
-        Client(addr, port).run_through(send_pings, loop=eventloop)
+        Client(addr, port).run_through(send_pings, send_pings, loop=eventloop)
         for _ in range(CLIENTS)
     ]
     # `run_through()` may take any number of Coroutines as Arguments. They will
     #   be awaited, with the Client passed, sequentially.
 
     try:
-        # asyncio.wait(asyncio.gather(*x))
         eventloop.run_until_complete(asyncio.gather(*x))
 
     except KeyboardInterrupt:
@@ -71,6 +70,7 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
 
     finally:
         try:
+            print("Cleaning up...")
             tasks = asyncio.Task.all_tasks()
             for t in [t for t in tasks if not (t.done() or t.cancelled())]:
                 eventloop.run_until_complete(t)
