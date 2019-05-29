@@ -1,3 +1,5 @@
+"""Module defining Callback functions to be executed with Futures."""
+
 import asyncio
 
 

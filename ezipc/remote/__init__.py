@@ -1,4 +1,7 @@
-"""Module defining a superclass with methods common to Clients and Servers."""
+"""Package defining a superclass with methods common to Clients and Servers.
+
+This is where the real work gets done.
+"""
 
 from asyncio import (
     AbstractEventLoop,
@@ -20,10 +23,19 @@ from json import JSONDecodeError
 from typing import Dict, List, Union
 from uuid import uuid4
 
-from . import protocol
+from .protocol import (
+    Errors,
+    make_notif,
+    make_request,
+    make_response,
+    unpack,
+    verify_notif,
+    verify_request,
+    verify_response,
+)
 from .connection import Connection, CryptoError
 from .exc import RemoteError
-from .output import echo, err as err_, warn
+from ..util.output import echo, err as err_, warn
 
 
 class Remote:
@@ -67,9 +79,7 @@ class Remote:
     def _add_default_hooks(self):
         async def cb_ping(data: dict, remote: Remote):
             await remote.respond(
-                data["id"],
-                data["method"],
-                res=data.get("params") or [None],
+                data["id"], data["method"], res=data.get("params") or [None]
             )
 
         self.hook_request("PING", cb_ping)
@@ -133,17 +143,17 @@ class Remote:
 
     async def process_line(self, line: str):
         try:
-            data = protocol.unpack(line)
+            data = unpack(line)
         except JSONDecodeError as e:
             warn("Invalid JSON received from {}.".format(self))
-            await self.respond("0", err=protocol.Errors.parse_error(str(e)))
+            await self.respond("0", err=Errors.parse_error(str(e)))
             return
         except UnicodeDecodeError:
             warn("Corrupt data received from {}.".format(self))
             return
 
         keys = list(data.keys())
-        if protocol.verify_response(keys, data):
+        if verify_response(keys, data):
             # Message is a RESPONSE.
             echo("recv", "Receiving a Response from {}...".format(self))
             self.total_recv["response"] += 1
@@ -181,7 +191,7 @@ class Remote:
                 # Nothing is waiting for this message. Make a note and move on.
                 warn("Received an unsolicited Response. UUID: {}".format(mid))
 
-        elif protocol.verify_request(keys, data):
+        elif verify_request(keys, data):
             # Message is a REQUEST.
             echo(
                 "recv",
@@ -197,10 +207,10 @@ class Remote:
             else:
                 # We have no hook for this method; Return an Error.
                 await self.respond(
-                    data["id"], err=protocol.Errors.method_not_found(data.get("method"))
+                    data["id"], err=Errors.method_not_found(data.get("method"))
                 )
 
-        elif protocol.verify_notif(keys, data):
+        elif verify_notif(keys, data):
             # Message is a NOTIFICATION.
             echo(
                 "recv",
@@ -222,9 +232,7 @@ class Remote:
             #   send a Response containing an Error and a frowny face.
             echo("", "Received an invalid Message from {}".format(self))
             if "id" in data:
-                await self.respond(
-                    data["id"], err=protocol.Errors.invalid_request(keys)
-                )
+                await self.respond(data["id"], err=Errors.invalid_request(keys))
 
     def hook_notif(self, method: str, func):
         """Signal to the Remote that `func` is waiting for Notifications of the
@@ -264,7 +272,11 @@ class Remote:
                 try:
                     line = await self.get_line()
                 except CryptoError as e:
-                    warn("Decryption from {} failed: {} - {}".format(self, type(e).__name__, e))
+                    warn(
+                        "Decryption from {} failed: {} - {}".format(
+                            self, type(e).__name__, e
+                        )
+                    )
                 else:
                     await self.process_line(line)
         except IncompleteReadError:
@@ -295,11 +307,11 @@ class Remote:
             echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
             self.total_sent["notif"] += 1
             if type(params) == dict:
-                await self.send(protocol.make_notif(meth, **params))
+                await self.send(make_notif(meth, **params))
             elif type(params) == list:
-                await self.send(protocol.make_notif(meth, *params))
+                await self.send(make_notif(meth, *params))
             else:
-                await self.send(protocol.make_notif(meth))
+                await self.send(make_notif(meth))
         except Exception as e:
             err_("Failed to send Notification:", e)
             if nohandle:
@@ -320,11 +332,11 @@ class Remote:
         self.total_sent["request"] += 1
 
         if type(params) == dict:
-            data, mid = protocol.make_request(meth, **params)
+            data, mid = make_request(meth, **params)
         elif type(params) == list:
-            data, mid = protocol.make_request(meth, *params)
+            data, mid = make_request(meth, *params)
         else:
-            data, mid = protocol.make_request(meth)
+            data, mid = make_request(meth)
 
         # Create a Future which will represent the Response.
         future: Future = self.eventloop.create_future()
@@ -398,9 +410,7 @@ class Remote:
         self.total_sent["response"] += 1
         try:
             await self.send(
-                protocol.make_response(mid, err=err)
-                if err
-                else protocol.make_response(mid, res=res)
+                make_response(mid, err=err) if err else make_response(mid, res=res)
             )
         except Exception as e:
             err_("Failed to send Response:", e)

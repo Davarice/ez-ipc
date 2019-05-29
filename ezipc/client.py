@@ -9,8 +9,8 @@ from asyncio import (
 )
 from datetime import datetime as dt
 
-from .common import Remote
-from .output import echo, err, P, warn
+from .remote import Remote
+from .util.output import echo, err, P, warn
 
 
 class Client:

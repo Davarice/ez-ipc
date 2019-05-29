@@ -13,9 +13,9 @@ from collections import Counter, Set
 from datetime import datetime as dt
 from typing import Union
 
-from .common import Remote
-from .etc import callback_response
-from .output import echo, err, warn
+from .remote import Remote
+from .util.callbacks import callback_response
+from .util.output import echo, err, warn
 
 
 class Server:

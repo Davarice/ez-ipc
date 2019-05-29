@@ -1,7 +1,7 @@
 import asyncio
 
-from .etc import callback_response
-from .output import echo, err, set_verbosity
+from .util.callbacks import callback_response
+from .util.output import echo, err, set_verbosity
 
 
 def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
