@@ -63,7 +63,6 @@ class Connection:
 
     async def read(self) -> str:
         ctext: bytes = await self.instr.readuntil(sep)
-        print(repr(ctext.hex()))
         self.total_recv += len(ctext)
         ptext: str = self._decrypt(ctext[:-len(sep)])
         return ptext
