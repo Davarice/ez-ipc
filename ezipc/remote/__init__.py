@@ -33,7 +33,7 @@ from .protocol import (
     verify_request,
     verify_response,
 )
-from .connection import Connection, CryptoError
+from .connection import Connection
 from .exc import RemoteError
 from ..util.output import echo, err as err_, warn
 
@@ -50,7 +50,6 @@ class Remote:
         self.hooks_request = {}  # {"method": function()}
 
         self.futures: Dict[str, Future] = {}
-        self.tasks: List[Task] = []
         self.total_sent: Counter = Counter(byte=0, notif=0, request=0, response=0)
         self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
 
@@ -141,7 +140,7 @@ class Remote:
         else:
             return line
 
-    async def process_line(self, line: str):
+    async def process_line(self, line: str, tasks: List[Task]):
         try:
             data = unpack(line)
         except JSONDecodeError as e:
@@ -203,7 +202,7 @@ class Remote:
                 func = self.hooks_request[data["method"]]
                 # await func(data, self)
                 tsk = create_task(func(data, self))
-                self.tasks.append(tsk)
+                tasks.append(tsk)
             else:
                 # We have no hook for this method; Return an Error.
                 await self.respond(
@@ -225,7 +224,7 @@ class Remote:
             elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
-                self.tasks.append(create_task(func(data, self)))
+                tasks.append(create_task(func(data, self)))
 
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
@@ -250,10 +249,10 @@ class Remote:
         self.total_recv["byte"] = self.connection.total_recv
         self.total_sent["byte"] = self.connection.total_sent
 
-        for coro in self.tasks:
-            # Cancel all running Tasks.
-            if coro:
-                coro.cancel()
+        # for coro in self.tasks:
+        #     # Cancel all running Tasks.
+        #     if coro:
+        #         coro.cancel()
 
         if self.group is not None and self in self.group:
             # Remove self from Client Set, if possible.
@@ -268,17 +267,19 @@ class Remote:
 
     async def loop(self):
         try:
-            while True:
-                try:
-                    line = await self.get_line()
-                except CryptoError as e:
+            async for line in self.connection:
+                if isinstance(line, Exception):
                     warn(
                         "Decryption from {} failed: {} - {}".format(
-                            self, type(e).__name__, e
+                            self, type(line).__name__, line
                         )
                     )
                 else:
-                    await self.process_line(line)
+                    tasks: List[Task] = []
+
+                    await self.process_line(line, tasks)
+                    await gather(*tasks)
+
         except IncompleteReadError:
             err_("Connection with {} cut off.".format(self))
         except EOFError:
@@ -293,13 +294,8 @@ class Remote:
         except Exception as e:
             err_("Connection with {} failed:".format(self), e)
         finally:
-            try:
-                tasks = gather(*self.tasks)
-                self.tasks = []
-                await tasks
-            finally:
-                self.total_recv["byte"] = self.connection.total_recv
-                self.total_sent["byte"] = self.connection.total_sent
+            self.total_recv["byte"] = self.connection.total_recv
+            self.total_sent["byte"] = self.connection.total_sent
 
     async def notif(self, meth: str, params: Union[dict, list] = None, nohandle=False):
         """Assemble and send a JSON-RPC Notification with the given data."""

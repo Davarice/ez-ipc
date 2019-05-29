@@ -77,3 +77,16 @@ class Connection:
 
         await self.outstr.drain()
         return count
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            line: str = await self.read()
+            if line:
+                return line
+            else:
+                raise StopAsyncIteration
+        except CryptoError as e:
+            return e
