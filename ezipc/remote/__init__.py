@@ -6,7 +6,6 @@ This is where the real work gets done.
 from asyncio import (
     AbstractEventLoop,
     CancelledError,
-    create_task,
     Future,
     gather,
     IncompleteReadError,
@@ -207,7 +206,7 @@ class Remote:
                 # We know where to send this type of Request.
                 func = self.hooks_request[data["method"]]
                 # await func(data, self)
-                tsk = create_task(func(data, self))
+                tsk = self.eventloop.create_task(func(data, self))
                 tasks.append(tsk)
             else:
                 # We have no hook for this method; Return an Error.
@@ -230,7 +229,7 @@ class Remote:
             elif data["method"] in self.hooks_notif:
                 # We know where to send this type of Notification.
                 func = self.hooks_notif[data["method"]]
-                tasks.append(create_task(func(data, self)))
+                tasks.append(self.eventloop.create_task(func(data, self)))
 
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
@@ -280,7 +279,7 @@ class Remote:
         helpers = []
         try:
             for _ in range(3):
-                helpers.append(create_task(self.helper(self.lines)))
+                helpers.append(self.eventloop.create_task(self.helper(self.lines)))
 
             async for item in self.connection:
                 if isinstance(item, Exception):
