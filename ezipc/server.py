@@ -65,24 +65,39 @@ class Server:
             overwritten by Subclasses.
         """
 
+        @self.hook_request("TIME")
         async def cb_time(data, conn: Remote):
             await conn.respond(
                 data.get("id", "0"), res={"startup": self.startup.timestamp()}
             )
 
-        self.hook_request("TIME", cb_time)
-
-    def hook_notif(self, method: str, func):
+    def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
         """
-        self.hooks_notif[method] = func
+        if func:
+            # Function provided. Hook it directly.
+            self.hooks_notif[method] = func
+        else:
+            # Function NOT provided. Return a Decorator.
+            def hook(func_):
+                self.hooks_notif[method] = func_
 
-    def hook_request(self, method: str, func):
+            return hook
+
+    def hook_request(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
         """
-        self.hooks_request[method] = func
+        if func:
+            # Function provided. Hook it directly.
+            self.hooks_request[method] = func
+        else:
+            # Function NOT provided. Return a Decorator.
+            def hook(func_):
+                self.hooks_request[method] = func_
+
+            return hook
 
     async def broadcast(
         self, meth: str, params: Union[dict, list] = None, cb_broadcast=None

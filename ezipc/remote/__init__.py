@@ -81,13 +81,17 @@ class Remote:
         return "Remote " + self.id
 
     def _add_default_hooks(self):
+        """Add the initial hooks for the connection: Ping, and the two hooks
+            required for an RSA Key Exchange.
+        """
+
+        @self.hook_request("PING")
         async def cb_ping(data: dict, remote: Remote):
             await remote.respond(
                 data["id"], data["method"], res=data.get("params") or [None]
             )
 
-        self.hook_request("PING", cb_ping)
-
+        @self.hook_request("RSA.EXCH")
         async def cb_rsa_exchange(data: dict, remote: Remote):
             if remote.connection.can_encrypt:
                 echo(
@@ -105,27 +109,24 @@ class Remote:
                 err_("Cannot establish a Secure Connection.")
                 await remote.respond(data["id"], data["method"], res=[False])
 
-        self.hook_request("RSA.EXCH", cb_rsa_exchange)
-
+        @self.hook_request("RSA.CONF")
         async def cb_rsa_confirm(data: dict, remote: Remote):
             if remote.connection.can_activate():
                 await remote.respond(data["id"], data["method"], res=[True])
                 remote.connection.begin_encryption()
                 echo("win", "Connection Secured by RSA Key Exchange.")
 
-        self.hook_request("RSA.CONF", cb_rsa_confirm)
-
     async def enable_rsa(self) -> bool:
         if not self.connection.can_encrypt or self.connection.box:
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
-            key = (await self.request_wait("RSA.EXCH", [self.connection.key], [None]))[
-                0
-            ]
+            remote_key = (
+                await self.request_wait("RSA.EXCH", [self.connection.key], [None])
+            )[0]
 
-            if key:
-                self.connection.add_key(key)
+            if remote_key:
+                self.connection.add_key(remote_key)
             else:
                 return False
 
@@ -238,17 +239,33 @@ class Remote:
             if "id" in data:
                 await self.respond(data["id"], err=Errors.invalid_request(keys))
 
-    def hook_notif(self, method: str, func):
+    def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
         """
-        self.hooks_notif[method] = func
+        if func:
+            # Function provided. Hook it directly.
+            self.hooks_notif[method] = func
+        else:
+            # Function NOT provided. Return a Decorator.
+            def hook(func_):
+                self.hooks_notif[method] = func_
 
-    def hook_request(self, method: str, func):
+            return hook
+
+    def hook_request(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
         """
-        self.hooks_request[method] = func
+        if func:
+            # Function provided. Hook it directly.
+            self.hooks_request[method] = func
+        else:
+            # Function NOT provided. Return a Decorator.
+            def hook(func_):
+                self.hooks_request[method] = func_
+
+            return hook
 
     def close(self):
         self.total_recv["byte"] = self.connection.total_recv
