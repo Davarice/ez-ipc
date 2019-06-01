@@ -35,6 +35,7 @@ from .protocol import (
 )
 from .connection import Connection
 from .exc import RemoteError
+from .handlers import handled, request_handler
 from ..util.output import echo, err as err_, warn
 
 
@@ -46,6 +47,7 @@ class Remote:
         self.connection = Connection(instr, outstr)
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
+        self.helper_count = 3
         self.hooks_notif = {}  # {"method": function()}
         self.hooks_request = {}  # {"method": function()}
 
@@ -85,36 +87,34 @@ class Remote:
             required for an RSA Key Exchange.
         """
 
-        @self.hook_request("PING")
-        async def cb_ping(data: dict, remote: Remote):
-            await remote.respond(
-                data["id"], data["method"], res=data.get("params") or [None]
-            )
+        @request_handler(self, "PING")
+        async def cb_ping(data: dict, _remote: Remote) -> handled:
+            return 0, data.get("params", [])
 
-        @self.hook_request("RSA.EXCH")
-        async def cb_rsa_exchange(data: dict, remote: Remote):
+        @request_handler(self, "RSA.EXCH")
+        async def cb_rsa_exchange(data: dict, remote: Remote) -> handled:
             if remote.connection.can_encrypt:
                 echo(
                     "info",
                     [
-                        "Receiving a request for Secure Connection. Sending Key.",
+                        "Receiving request for Secure Connection. Sending Key.",
                         "(The connection is not encrypted yet.)",
                     ],
                 )
                 remote.connection.add_key(data.get("params", [None])[0])
-                await remote.respond(
-                    data["id"], data["method"], res=[remote.connection.key]
-                )
+                return 0, [remote.connection.key]
             else:
                 err_("Cannot establish a Secure Connection.")
-                await remote.respond(data["id"], data["method"], res=[False])
+                return 92, "Encryption Unavailable"
 
-        @self.hook_request("RSA.CONF")
-        async def cb_rsa_confirm(data: dict, remote: Remote):
+        @request_handler(self, "RSA.CONF")
+        async def cb_rsa_confirm(data: dict, remote: Remote) -> handled:
             if remote.connection.can_activate():
                 await remote.respond(data["id"], data["method"], res=[True])
                 remote.connection.begin_encryption()
                 echo("win", "Connection Secured by RSA Key Exchange.")
+            else:
+                return 1, "Cannot Activate"
 
     async def enable_rsa(self) -> bool:
         if not self.connection.can_encrypt or self.connection.box:
@@ -295,7 +295,7 @@ class Remote:
 
         helpers = []
         try:
-            for _ in range(3):
+            for _ in range(self.helper_count):
                 helpers.append(self.eventloop.create_task(self.helper(self.lines)))
 
             async for item in self.connection:

@@ -106,26 +106,25 @@ def make_request(*args, **kwargs) -> Tuple[str, str]:
     return json.dumps(req, **JSON_OPTS), mid
 
 
-def make_response(mid: str, res: Union[dict, list]=None, err: dict = None) -> str:
+def make_response(mid: str, res: Union[dict, list] = None, err: dict = None) -> str:
     """Make a Response, to be sent in reply to a Request.
 
     Contains:
         "jsonrpc" (str): Protocol specifier, must be "2.0".
         Exactly ONE of:
-            "result" (any): Whatever data should be sent back.
+            "result" (dict or list): Whatever data should be sent back.
             "error" (dict): A Dict built by `Errors.new()`, contains data about
                 what went wrong.
         "id": The UUID of the Request that prompted this Response.
     """
     resp = {"jsonrpc": __version__}
     if err:
-        keys = list(err.keys())
-        if not verify_error(keys):
+        if not verify_error(list(err.keys())):
             raise ValueError(
                 "Error must have keys 'code', 'message', and, optionally, 'data'."
             )
         resp["error"] = err
-    elif res:
+    elif res is not None:
         resp["result"] = res
     else:
         raise ValueError("Response MUST be provided either a Result or an Error.")

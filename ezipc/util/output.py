@@ -45,14 +45,14 @@ def set_colors(use_real: bool):
         "": (Color.WHITE, "", 1),
         "con": (Color.WHITE, " ++", 1),
         "dcon": (Color.LIGHTBLACK_EX, "X- ", 1),
-        "win": (Color.LIGHTGREEN_EX, "\o/", 2),
+        "win": (Color.LIGHTGREEN_EX, "\o/", 1),
         "diff": (Color.WHITE, "*- ", 2),
-        "err": (Color.MAGENTA, "x!x", 3),
+        "err": (Color.MAGENTA, "x!x", 1),
         "recv": (Color.WHITE, "-->", 3),
         "send": (Color.LIGHTBLACK_EX, "<--", 3),
         "tab": (Color.WHITE, "   ", 3),
         "warn": (Color.MAGENTA, "(!)", 3),
-        "info": (Color.CYAN, "(!)", 4),
+        "info": (Color.CYAN, "(!)", 2),
     }
 
 
