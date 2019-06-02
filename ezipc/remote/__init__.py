@@ -23,6 +23,9 @@ from json import JSONDecodeError
 from typing import Dict, List, Union
 from uuid import uuid4
 
+from .connection import can_encrypt, Connection
+from .exc import RemoteError
+from .handlers import handled, request_handler
 from .protocol import (
     Errors,
     make_notif,
@@ -33,10 +36,7 @@ from .protocol import (
     verify_request,
     verify_response,
 )
-from .connection import Connection
-from .exc import RemoteError
-from .handlers import handled, request_handler
-from ..util.output import echo, err as err_, warn
+from ..util import echo, err as err_, warn
 
 
 class Remote:
@@ -237,6 +237,9 @@ class Remote:
             echo("", "Received an invalid Message from {}".format(self))
             if "id" in data:
                 await self.respond(data["id"], err=Errors.invalid_request(keys))
+
+    def handle_request(self, method: str):
+        return request_handler(self, method)
 
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
