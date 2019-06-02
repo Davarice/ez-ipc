@@ -61,19 +61,27 @@ set_colors(True)
 
 class _Printer:
     def __init__(self, verbosity: int = 2):
+        self.file = None
         self.output_line = print
         self.startup: dt = dt.utcnow()
         self.verbosity: int = verbosity
 
     def emit(self, etype: str, text: str, color: str = ""):
+        now = dt.utcnow()
         p_color, prefix, pri = prefices.get(etype) or (Color.WHITE, etype, 4)
+        if self.file:
+            print(
+                "<{}> {} {}".format(now.isoformat(sep=" ")[:-3], prefix, str(text)),
+                file=self.file,
+                flush=True,
+            )
         if pri <= self.verbosity:
             self.output_line(
                 # TODO: Decide which of these is better
                 "<{}> {} {}".format(  # One Time format
-                # "<{} | {}> {} {}".format(  # Two Times format
-                    str(dt.utcnow())[11:-4],  # Current Time
-                    # str(dt.utcnow() - self.startup)[:-7],  # Server Uptime
+                    # "<{} | {}> {} {}".format(  # Two Times format
+                    str(now)[11:-4],  # Current Time
+                    # str(now - self.startup)[:-7],  # Server Uptime
                     p_color + prefix,
                     (color or Color.RESET) + str(text) + Color.RESET,
                 )
@@ -83,22 +91,22 @@ class _Printer:
 P = _Printer()
 
 
-def echo(etype: str, text: Union[str, List[str]]):
+def echo(etype: str, text: Union[str, List[str]], color=""):
     if type(text) == list:
         for line in text:
-            P.emit(etype, line)
+            P.emit(etype, line, color)
     else:
-        P.emit(etype, text)
+        P.emit(etype, text, color)
 
 
 def err(text: str, exc: Exception = None):
     if exc:
         text += " {} - {}".format(type(exc).__name__, exc)
-    echo("err", Color.RED + text)
+    echo("err", text, Color.RED)
 
 
 def warn(text: str):
-    echo("warn", Color.LIGHTYELLOW_EX + text)
+    echo("warn", text, Color.LIGHTYELLOW_EX)
 
 
 def set_verbosity(n: int):
