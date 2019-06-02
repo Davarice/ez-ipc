@@ -28,7 +28,7 @@ class Server:
     As the more passive component, the Server will spend most of its time waiting.
     """
 
-    def __init__(self, addr: str = "", port: int = 9002, autopublish=False):
+    def __init__(self, addr: str = "", port: int = 9002, autopublish=False, helpers=5):
         if autopublish:
             # Override the passed parameter and try to autofind the address.
             sock = socket(AF_INET, SOCK_DGRAM)
@@ -47,6 +47,7 @@ class Server:
 
         self.addr: str = addr
         self.port: int = port
+        self.helpers = helpers
 
         self.eventloop: AbstractEventLoop = None
         self.remotes: set = set()
@@ -178,7 +179,7 @@ class Server:
 
         rsa = self.eventloop.create_task(self.encrypt_remote(remote))
         try:
-            await remote.loop()
+            await remote.loop(self.helpers)
 
         finally:
             try:

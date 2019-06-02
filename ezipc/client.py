@@ -50,7 +50,7 @@ class Client:
         else:
             warn("Failed to get Server Uptime.")
 
-    async def connect(self, loop, timeout=10) -> bool:
+    async def connect(self, loop, helpers=5, timeout=10) -> bool:
         try:
             streams = await wait_for(
                 open_connection(self.addr, self.port, loop=loop), timeout
@@ -72,7 +72,7 @@ class Client:
                 self.remote.id
             ),
         )
-        self.listening = loop.create_task(self.remote.loop())
+        self.listening = loop.create_task(self.remote.loop(helpers))
         await self._add_hooks()
         return True
 

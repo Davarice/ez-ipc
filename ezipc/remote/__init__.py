@@ -47,7 +47,6 @@ class Remote:
         self.connection = Connection(instr, outstr)
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
-        self.helper_count = 3
         self.hooks_notif = {}  # {"method": function()}
         self.hooks_request = {}  # {"method": function()}
 
@@ -291,11 +290,11 @@ class Remote:
                 await gather(*tasks)
                 queue.task_done()
 
-    async def loop(self):
+    async def loop(self, helper_count: int = 5):
 
         helpers = []
         try:
-            for _ in range(self.helper_count):
+            for _ in range(helper_count):
                 helpers.append(self.eventloop.create_task(self.helper(self.lines)))
 
             async for item in self.connection:
