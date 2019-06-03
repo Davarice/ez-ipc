@@ -1,3 +1,4 @@
+from asyncio import Future
 from functools import wraps
 from os import strerror
 from typing import Tuple, Union
@@ -9,7 +10,7 @@ from ..util import err
 dl = Union[dict, list]
 
 # Return Type Union, provided for Linting/SCA purposes.
-handled = Union[
+rpc_response = Union[
     None,  # Send no Response.
     int,  # Send a very basic Response. 0 for Result, nonzero for Error.
     dl,  # Send an implicit Result response with Data.
@@ -37,7 +38,7 @@ def request_handler(host, method: str):
                 and capture its Return. Then, use the Return to construct and
                 send back a Response.
             """
-            outcome: handled = await coro(data, remote)
+            outcome: rpc_response = await coro(data, remote)
             try:
                 if outcome is not None:
                     if isinstance(outcome, int):
@@ -127,3 +128,31 @@ def request_handler(host, method: str):
         return handle_response
 
     return decorator
+
+
+def response_handler(remote, win=None, fail=None, cancel=None):
+    """Generate a Callback Function that will dispatch the outcome of a Future
+        to one of up to three other Functions depending on whether the passed
+        Future was successful.
+    """
+
+    def callback(future: Future):
+        if not future.done():
+            # Not done? Cant do anything.
+            return
+        elif future.cancelled():
+            # Cancelled? Dispatch. No args.
+            if cancel:
+                cancel()
+        else:
+            ex = future.exception()
+            if ex is None:
+                # No Exception? Dispatch the Result.
+                if win:
+                    win(future.result(), remote)
+            else:
+                # Exception? Dispatch the Exception.
+                if fail:
+                    fail(ex, remote)
+
+    return callback

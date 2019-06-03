@@ -25,7 +25,7 @@ from uuid import uuid4
 
 from .connection import can_encrypt, Connection
 from .exc import RemoteError
-from .handlers import handled, request_handler
+from .handlers import rpc_response, request_handler
 from .protocol import (
     Errors,
     make_notif,
@@ -87,11 +87,11 @@ class Remote:
         """
 
         @request_handler(self, "PING")
-        async def cb_ping(data: dict, _remote: Remote) -> handled:
+        async def cb_ping(data: dict, _remote: Remote) -> rpc_response:
             return data.get("params", [])
 
         @request_handler(self, "RSA.EXCH")
-        async def cb_rsa_exchange(data: dict, remote: Remote) -> handled:
+        async def cb_rsa_exchange(data: dict, remote: Remote) -> rpc_response:
             if remote.connection.can_encrypt:
                 echo(
                     "info",
@@ -107,7 +107,7 @@ class Remote:
                 return 92, "Encryption Unavailable"
 
         @request_handler(self, "RSA.CONF")
-        async def cb_rsa_confirm(data: dict, remote: Remote) -> handled:
+        async def cb_rsa_confirm(data: dict, remote: Remote) -> rpc_response:
             if remote.connection.can_activate():
                 await remote.respond(data["id"], data["method"], res=[True])
                 remote.connection.begin_encryption()

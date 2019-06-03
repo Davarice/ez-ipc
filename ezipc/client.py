@@ -9,7 +9,7 @@ from asyncio import (
 )
 from datetime import datetime as dt
 
-from .remote import can_encrypt, handled, Remote, RemoteError, request_handler
+from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
 from .util import callback_response, echo, err, P, warn
 
 
@@ -19,7 +19,7 @@ __all__ = [
     "Client",
     "echo",
     "err",
-    "handled",
+    "rpc_response",
     "P",
     "Remote",
     "RemoteError",
