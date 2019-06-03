@@ -11,6 +11,7 @@ dl = Union[dict, list]
 handled = Union[
     None,  # Send no Response.
     int,  # Send a very basic Response. 0 for Result, nonzero for Error.
+    dl,  # Send an implicit Result response with Data.
     Tuple[int, dl],  # Send a Result Response with Data.
     Tuple[int, str],  # Send an Error Response with a Message, but no Data.
     Tuple[int, str, dl],  # Send a full Error Response.
@@ -38,13 +39,42 @@ def request_handler(host, method: str):
             outcome: handled = await coro(data, remote)
             if outcome is not None:
                 if isinstance(outcome, int):
+                    # Received a Return Status, but no Data. Make an empty List
+                    #   to hold all the Data we do not have.
                     code: int = outcome
                     outcome: list = []
-                else:
+
+                elif isinstance(outcome, (dict, list)):
+                    # Received no Return Status, but received something that is
+                    #   probably Data. Assume Success and send a Response.
+                    await remote.respond(
+                        data["id"], data.get("method", method), res=outcome
+                    )
+                    return
+
+                elif isinstance(outcome, tuple):
+                    # Received multiple returns. The first should be a Status
+                    #   Code, but the rest will vary.
                     outcome: list = list(outcome)
                     code: int = outcome.pop(0)
 
-                if code:
+                else:
+                    # Your Data is bad, and you should feel bad.
+                    await remote.respond(
+                        data["id"],
+                        data.get("method", method),
+                        err=Errors.new(
+                            -32001,
+                            "Server error",
+                            [
+                                "Handler method '{}' returned erroneous Type."
+                                " Contact Project Maintainer.".format(coro.__name__)
+                            ],
+                        ),
+                    )
+                    return
+
+                if code != 0:
                     # ERROR. Send an Error Response.
                     if outcome:
                         # Retrieve further information.
@@ -66,15 +96,13 @@ def request_handler(host, method: str):
                     )
                 else:
                     # No error. Send a Result Response.
-                    if outcome:
-                        resdat = outcome.pop(0)
-                    else:
-                        resdat = []
+                    resdat = outcome.pop(0) if outcome else []
 
                     await remote.respond(
                         data["id"], data.get("method", method), res=resdat
                     )
             else:
+                # Returned None, therefore Return None.
                 return
 
         host.hooks_request[method] = handle_response
