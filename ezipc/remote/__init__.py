@@ -88,7 +88,7 @@ class Remote:
 
         @request_handler(self, "PING")
         async def cb_ping(data: dict, _remote: Remote) -> handled:
-            return 0, data.get("params", [])
+            return data.get("params", [])
 
         @request_handler(self, "RSA.EXCH")
         async def cb_rsa_exchange(data: dict, remote: Remote) -> handled:
@@ -101,7 +101,7 @@ class Remote:
                     ],
                 )
                 remote.connection.add_key(data.get("params", [None])[0])
-                return 0, [remote.connection.key]
+                return [remote.connection.key]
             else:
                 err_("Cannot establish a Secure Connection.")
                 return 92, "Encryption Unavailable"
