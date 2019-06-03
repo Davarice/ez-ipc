@@ -149,13 +149,30 @@ def request_handler(host: Remote, method: str) -> sig_req_cb_deco:
     return decorator
 
 
-def response_handler(remote, win=None, fail=None, cancel=None):
+sig_win = Callable[
+    [dl, Remote], None
+]  # Signature of the Function to be dispatched if the Future returns Result.
+sig_fail = Callable[
+    [Exception, Remote], None
+]  # Signature of the Function...returns Exception.
+sig_cancel = Callable[
+    [], None
+]  # Signature of...Cancelled.
+
+
+def response_handler(
+    remote: Remote,
+    *,
+    win: sig_win = None,
+    fail: sig_fail = None,
+    cancel: sig_cancel = None,
+) -> Callable[[Future], None]:
     """Generate a Callback Function that will dispatch the outcome of a Future
         to one of up to three other Functions depending on whether the passed
         Future was successful.
     """
 
-    def callback(future: Future):
+    def callback(future: Future) -> None:
         if not future.done():
             # Not done? Cant do anything.
             return

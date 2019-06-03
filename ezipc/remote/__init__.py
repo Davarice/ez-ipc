@@ -25,7 +25,7 @@ from uuid import uuid4
 
 from .connection import can_encrypt, Connection
 from .exc import RemoteError
-from .handlers import rpc_response, request_handler
+from .handlers import rpc_response, request_handler, response_handler
 from .protocol import (
     Errors,
     make_notif,
@@ -240,6 +240,9 @@ class Remote:
 
     def handle_request(self, method: str):
         return request_handler(self, method)
+
+    def handle_response(self, **kw):
+        return response_handler(self, **kw)
 
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
