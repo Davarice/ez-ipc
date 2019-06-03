@@ -1,6 +1,7 @@
 from asyncio import (
     AbstractEventLoop,
     AbstractServer,
+    gather,
     get_event_loop,
     run,
     start_server,
@@ -115,35 +116,38 @@ class Server:
             return hook
 
     async def broadcast(
-        self, meth: str, params: Union[dict, list] = None, cb_broadcast=None
+        self,
+        meth: str,
+        params: Union[dict, list] = None,
+        default=None,
+        *,
+        callback=None,
+        **kw
     ):
         if not self.remotes:
             return
 
-        @callback_response
-        def cb_confirm(data, remote):
-            if data:
-                echo("tab", "Broadcast '{}' received by {}.".format(meth, remote))
-            else:
-                warn("Broadcast '{}' NOT received by {}.".format(meth, remote))
+        if callback is None:
+            @callback_response
+            def cb_confirm(data, remote):
+                pass
 
-        reqs = []
-        for remote_ in self.remotes:
-            reqs.append(
-                (
-                    remote_,
-                    await remote_.request(
-                        meth, params, callback=cb_broadcast or cb_confirm
-                    ),
+        remotes = self.remotes.copy()
+        reqs = (
+            self.eventloop.create_task(
+                r.request_wait(
+                    meth, params, default, callback=callback, **kw
                 )
             )
+            for r in remotes
+        )
 
-        for remote_, request in reqs:
-            try:
-                await wait_for(request, 10)
-            except Exception:
-                warn("{} timed out.".format(remote_))
-                self.drop(remote_)
+        wins = await gather(*reqs, return_exceptions=True)
+        total = len(remotes)
+        wincount = total - wins.count(None)
+
+        echo("win", "Messages successfully Broadcast: {}/{}".format(wincount, total))
+        return list(zip(map(str, remotes), wins))
 
     def drop(self, remote: Remote):
         self.total_sent.update(remote.total_sent)
