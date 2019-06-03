@@ -41,21 +41,43 @@ sig_req_cb_deco = Callable[
 
 def request_handler(host: Remote, method: str) -> sig_req_cb_deco:
     """Generate a Decorator which will wrap a Coroutine in a Request Handler
-        and add a Callback Hook for a given RPC Method.
+    and add a Callback Hook for a given RPC Method.
+
+    For use with a Coroutine that **RECEIVES A REQUEST**, and **MUST SEND BACK**
+    a message with a Reponse.
+
+    :param Remote host: A Remote Object representing the IPC interface to
+        another, possibly non-local, Process.
+    :param str method: The JSON-RPC Method that the Decorator will hook the
+        passed Coroutine to listen for, like LOGIN or PING
+    :return: The Decorator Function that the next-defined Coroutine will
+        *actually* be passed to.
+    :rtype: sig_req_cb_deco
     """
-    # Passed a JSON-RPC Method String like LOGIN or PING.
 
     def decorator(coro: sig_req_cb) -> sig_req_handler:
         """Wrap a Coroutine in a Wrapper that will allow it to send back a
-            Response by simply Returning values.
+        Response by simply Returning values.
+
+        :param Coroutine coro: A Coroutine which will be passed the incoming
+            Request Data should have one of a specific set of valid Signatures.
+
+        :return: A Wrapped Coroutine which will Await the input Coroutine, and
+            then send a Response Message back to the Remote that sent it, with a
+            Result or Error attached as appropriate.
+        :rtype: Callable[[Union[dict, list], Remote], Coroutine]
         """
-        # Coro should take data and remote, and return None, Int, or a Tuple.
 
         @wraps(coro)
         async def handle_request(data: dl, remote: Remote) -> None:
             """Given Data and a Remote, execute the Coroutine provided above,
-                and capture its Return. Then, use the Return to construct and
-                send back a Response.
+            and capture its Return. Then, use the Return to construct and send
+            back a Response.
+
+            :param Union[dict, list] data: Data received from the Remote as part
+                of the Request Message.
+            :param Remote remote: A Remote Object representing the IPC interface
+                to another, possibly non-local, Process.
             """
             outcome: rpc_response = await coro(data, remote)
             try:
@@ -168,8 +190,25 @@ def response_handler(
     cancel: sig_cancel = None,
 ) -> Callable[[Future], None]:
     """Generate a Callback Function that will dispatch the outcome of a Future
-        to one of up to three other Functions depending on whether the passed
-        Future was successful.
+    to one of up to three other Functions depending on whether the passed
+    Future was successful.
+
+    For use with Synchronous Functions that **RECEIVE A RESPONSE** after a
+    Request has been sent.
+
+    :param Remote remote: A Remote Object representing the IPC interface to
+        another, possibly non-local, Process.
+    :type remote: Remote
+    :param Callable[[dl, Remote], None] win: A Function to be dispatched the
+        Result of a Future if the Future comes back successful.
+    :param Callable[[Exception, Remote], None] fail: A Function to be dispatched
+        the Exception returned by a Future which is not successful.
+    :param Callable[[], None] cancel: A Function to be dispatched with no
+        arguments if the Future is Cancelled.
+
+    :return: A Callback Function which receives a Future and dispatches it to
+        one of the provided Functions.
+    :rtype: Callable[[Future], None]
     """
 
     def callback(future: Future) -> None:
