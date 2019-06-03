@@ -20,7 +20,7 @@ from collections import Counter
 from datetime import datetime as dt
 from functools import partial
 from json import JSONDecodeError
-from typing import Dict, List, Union
+from typing import Any, Callable, Dict, List, Union
 from uuid import uuid4
 
 from .connection import can_encrypt, Connection
@@ -40,17 +40,23 @@ from ..util import echo, err as err_, warn
 
 
 class Remote:
-    def __init__(self, eventloop, instr, outstr, group: set = None):
+    def __init__(
+        self,
+        eventloop: AbstractEventLoop,
+        instr: StreamReader,
+        outstr: StreamWriter,
+        group: set = None,
+    ):
         self.eventloop: AbstractEventLoop = eventloop
         self.instr: StreamReader = instr
         self.outstr: StreamWriter = outstr
-        self.connection = Connection(instr, outstr)
+        self.connection: Connection = Connection(instr, outstr)
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
-        self.hooks_notif = {}  # {"method": function()}
-        self.hooks_request = {}  # {"method": function()}
-
+        self.hooks_notif: Dict[str, Callable] = {}
+        self.hooks_request: Dict[str, Callable] = {}
         self.futures: Dict[str, Future] = {}
+
         self.lines: Queue = Queue()
         self.total_sent: Counter = Counter(byte=0, notif=0, request=0, response=0)
         self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
@@ -78,7 +84,7 @@ class Remote:
     def open(self) -> bool:
         return self.connection.open
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "Remote " + self.id
 
     def _add_default_hooks(self):
@@ -238,10 +244,10 @@ class Remote:
             if "id" in data:
                 await self.respond(data["id"], err=Errors.invalid_request(keys))
 
-    def handle_request(self, method: str):
+    def handle_request(self, method: str) -> Callable:
         return request_handler(self, method)
 
-    def handle_response(self, **kw):
+    def handle_response(self, **kw) -> Callable:
         return response_handler(self, **kw)
 
     def hook_notif(self, method: str, func=None):
@@ -297,7 +303,6 @@ class Remote:
                 queue.task_done()
 
     async def loop(self, helper_count: int = 5):
-
         helpers = []
         try:
             for _ in range(helper_count):
@@ -336,7 +341,7 @@ class Remote:
 
             await gather(*helpers, return_exceptions=True)
 
-    async def notif(self, meth: str, params: Union[dict, list] = None, nohandle=False):
+    async def notif(self, meth: str, params: Union[dict, list] = None, nohandle: bool = False):
         """Assemble and send a JSON-RPC Notification with the given data."""
         if not self.open:
             return
@@ -360,8 +365,8 @@ class Remote:
         meth: str,
         params: Union[dict, list] = None,
         *,
-        callback=None,
-        nohandle=False
+        callback: Callable = None,
+        nohandle: bool = False
     ) -> Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
@@ -402,12 +407,12 @@ class Remote:
         self,
         meth: str,
         params: Union[dict, list] = None,
-        default=None,
+        default: Any = None,
         *,
-        callback=None,
-        nohandle=False,
-        timeout=10,
-        raise_remote_err=False
+        callback: Callable = None,
+        nohandle: bool = False,
+        timeout: int = 10,
+        raise_remote_err: bool = False
     ):
         """Send a JSON-RPC Request with the given data, the same as
             `Remote.request()`. However, rather than return the Future, handle
@@ -443,7 +448,7 @@ class Remote:
         *,
         err: dict = None,
         res: Union[dict, list] = None,
-        nohandle=False
+        nohandle: bool = False
     ):
         if not self.open:
             return

@@ -8,6 +8,8 @@ from ..util import err
 
 if TYPE_CHECKING:
     from . import Remote
+else:
+    from .stubs import Remote
 
 
 dl = Union[dict, list]
@@ -50,16 +52,17 @@ def request_handler(host: Remote, method: str) -> sig_req_cb_deco:
         another, possibly non-local, Process.
     :param str method: The JSON-RPC Method that the Decorator will hook the
         passed Coroutine to listen for, like LOGIN or PING
+
     :return: The Decorator Function that the next-defined Coroutine will
         *actually* be passed to.
-    :rtype: sig_req_cb_deco
+    :rtype: Callable
     """
 
     def decorator(coro: sig_req_cb) -> sig_req_handler:
         """Wrap a Coroutine in a Wrapper that will allow it to send back a
         Response by simply Returning values.
 
-        :param Coroutine coro: A Coroutine which will be passed the incoming
+        :param Callable coro: A Coroutine which will be passed the incoming
             Request Data should have one of a specific set of valid Signatures.
 
         :return: A Wrapped Coroutine which will Await the input Coroutine, and
@@ -199,11 +202,11 @@ def response_handler(
     :param Remote remote: A Remote Object representing the IPC interface to
         another, possibly non-local, Process.
     :type remote: Remote
-    :param Callable[[dl, Remote], None] win: A Function to be dispatched the
+    :param Callable win: A Function to be dispatched the
         Result of a Future if the Future comes back successful.
-    :param Callable[[Exception, Remote], None] fail: A Function to be dispatched
+    :param Callable fail: A Function to be dispatched
         the Exception returned by a Future which is not successful.
-    :param Callable[[], None] cancel: A Function to be dispatched with no
+    :param Callable cancel: A Function to be dispatched with no
         arguments if the Future is Cancelled.
 
     :return: A Callback Function which receives a Future and dispatches it to
