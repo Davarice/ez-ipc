@@ -1,10 +1,13 @@
 from asyncio import Future
 from functools import wraps
 from os import strerror
-from typing import Tuple, Union
+from typing import Callable, Coroutine, Tuple, TYPE_CHECKING, Union
 
 from .protocol import Errors
 from ..util import err
+
+if TYPE_CHECKING:
+    from . import Remote
 
 
 dl = Union[dict, list]
@@ -13,27 +16,43 @@ dl = Union[dict, list]
 rpc_response = Union[
     None,  # Send no Response.
     int,  # Send a very basic Response. 0 for Result, nonzero for Error.
-    dl,  # Send an implicit Result response with Data.
+    dl,  # Send an implicit Result Response with Data.
     Tuple[int, dl],  # Send a Result Response with Data.
     Tuple[int, str],  # Send an Error Response with a Message, but no Data.
     Tuple[int, str, dl],  # Send a full Error Response.
 ]
 
+# Define Signatures for Type Checking this horrific web of calls.
+sig_req_cb = Callable[
+    [dl, Remote], rpc_response
+]  # Signature of the Coroutine defined under `@request_handler()`.
+sig_req_handler = Callable[
+    [dl, Remote], Coroutine
+]  # Signature of the Coroutine returned by `@request_handler()`.
 
-def request_handler(host, method: str):
-    """Generate a Decorator which will wrap a Coroutine in a Response Handler
+sig_req_cb_deco = Callable[
+    [sig_req_cb], sig_req_handler
+]  # Signature of the Decorator Function that a Coroutine defined under
+   #    `@request_handler()` ACTUALLY gets passed to.
+
+# ^ This is an utter nightmare to figure out. But it makes the Type Checker
+#   incredibly smart about what you send where. Worth it.
+
+
+def request_handler(host: Remote, method: str) -> sig_req_cb_deco:
+    """Generate a Decorator which will wrap a Coroutine in a Request Handler
         and add a Callback Hook for a given RPC Method.
     """
     # Passed a JSON-RPC Method String like LOGIN or PING.
 
-    def decorator(coro):
+    def decorator(coro: sig_req_cb) -> sig_req_handler:
         """Wrap a Coroutine in a Wrapper that will allow it to send back a
             Response by simply Returning values.
         """
         # Coro should take data and remote, and return None, Int, or a Tuple.
 
         @wraps(coro)
-        async def handle_response(data, remote):
+        async def handle_request(data: dl, remote: Remote) -> None:
             """Given Data and a Remote, execute the Coroutine provided above,
                 and capture its Return. Then, use the Return to construct and
                 send back a Response.
@@ -124,8 +143,8 @@ def request_handler(host, method: str):
                         err=Errors.new(121, type(e).__name__, [str(e)]),
                     )
 
-        host.hooks_request[method] = handle_response
-        return handle_response
+        host.hooks_request[method] = handle_request
+        return handle_request
 
     return decorator
 
