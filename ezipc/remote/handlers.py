@@ -1,7 +1,7 @@
 from asyncio import Future
 from functools import wraps
 from os import strerror
-from typing import Callable, Coroutine, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Tuple, TYPE_CHECKING, TypeVar, Union
 
 from .protocol import Errors
 from ..util import err
@@ -9,10 +9,10 @@ from ..util import err
 if TYPE_CHECKING:
     from . import Remote
 else:
-    from .stubs import Remote
+    Remote = TypeVar("Remote")
 
 
-dl = Union[dict, list]
+dl = TypeVar("dl", dict, list)
 
 # Return Type Union, provided for Linting/SCA purposes.
 rpc_response = Union[
@@ -24,24 +24,8 @@ rpc_response = Union[
     Tuple[int, str, dl],  # Send a full Error Response.
 ]
 
-# Define Signatures for Type Checking this horrific web of calls.
-sig_req_cb = Callable[
-    [dl, Remote], rpc_response
-]  # Signature of the Coroutine defined under `@request_handler()`.
-sig_req_handler = Callable[
-    [dl, Remote], Coroutine
-]  # Signature of the Coroutine returned by `@request_handler()`.
 
-sig_req_cb_deco = Callable[
-    [sig_req_cb], sig_req_handler
-]  # Signature of the Decorator Function that a Coroutine defined under
-   #    `@request_handler()` ACTUALLY gets passed to.
-
-# ^ This is an utter nightmare to figure out. But it makes the Type Checker
-#   incredibly smart about what you send where. Worth it.
-
-
-def request_handler(host: Remote, method: str) -> sig_req_cb_deco:
+def request_handler(host: Remote, method: str) -> Callable:
     """Generate a Decorator which will wrap a Coroutine in a Request Handler
     and add a Callback Hook for a given RPC Method.
 
@@ -58,7 +42,7 @@ def request_handler(host: Remote, method: str) -> sig_req_cb_deco:
     :rtype: Callable
     """
 
-    def decorator(coro: sig_req_cb) -> sig_req_handler:
+    def decorator(coro: Callable) -> Callable:
         """Wrap a Coroutine in a Wrapper that will allow it to send back a
         Response by simply Returning values.
 
@@ -174,23 +158,12 @@ def request_handler(host: Remote, method: str) -> sig_req_cb_deco:
     return decorator
 
 
-sig_win = Callable[
-    [dl, Remote], None
-]  # Signature of the Function to be dispatched if the Future returns Result.
-sig_fail = Callable[
-    [Exception, Remote], None
-]  # Signature of the Function...returns Exception.
-sig_cancel = Callable[
-    [], None
-]  # Signature of...Cancelled.
-
-
 def response_handler(
     remote: Remote,
     *,
-    win: sig_win = None,
-    fail: sig_fail = None,
-    cancel: sig_cancel = None,
+    win: Callable = None,
+    fail: Callable = None,
+    cancel: Callable = None,
 ) -> Callable[[Future], None]:
     """Generate a Callback Function that will dispatch the outcome of a Future
     to one of up to three other Functions depending on whether the passed
@@ -201,7 +174,6 @@ def response_handler(
 
     :param Remote remote: A Remote Object representing the IPC interface to
         another, possibly non-local, Process.
-    :type remote: Remote
     :param Callable win: A Function to be dispatched the
         Result of a Future if the Future comes back successful.
     :param Callable fail: A Function to be dispatched
