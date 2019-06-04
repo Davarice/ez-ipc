@@ -8,6 +8,7 @@ from asyncio import (
     wait_for,
 )
 from datetime import datetime as dt
+from typing import Callable, Union
 
 from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
 from .util import callback_response, echo, err, P, warn
@@ -30,13 +31,17 @@ __all__ = [
 
 class Client:
     """The Client is the component of the Client/Server Model that connects to
-        a Server and sends it input. In certain cases the Client will also wait
-        for returned data from the Server, such as Responses to Requests sent by
-        the Client. Rarely, the Client may also be designed to accept data which
-        was not expressly requested, such as a live chat program.
+    a Server and sends it input. In certain cases the Client will also wait for
+    returned data from the Server, such as Responses to Requests sent by the
+    Client. Rarely, the Client may also be designed to accept data which was not
+    expressly requested, such as a live chat program.
 
     As the more active component, the Client will often spend most of its time
-        sending Messages, or waiting for Responses.
+    sending Messages, or waiting for Responses.
+
+    :param str addr: IPv4 Address of the Server this Client will connect to. If
+        this is not supplied, ``127.0.0.1`` will be used.
+    :param int port: IP Port of the Server to use.
     """
 
     def __init__(self, addr: str = "127.0.0.1", port: int = 9002):
@@ -50,7 +55,8 @@ class Client:
         self.startup: dt = dt.utcnow()
 
     @property
-    def alive(self):
+    def alive(self) -> bool:
+        """Determine whether the Remote is still connected."""
         return bool(self.remote and not self.remote.outstr.is_closing())
 
     async def _add_hooks(self):
@@ -65,7 +71,24 @@ class Client:
         else:
             warn("Failed to get Server Uptime.")
 
-    async def connect(self, loop, helpers=5, timeout=10) -> bool:
+    async def connect(
+        self, loop: AbstractEventLoop, helpers: int = 5, timeout: Union[float, int] = 10
+    ) -> bool:
+        """Connect to a Server and create a Remote Object around its Streams.
+        Then, establish Client Request and Notification Hooks with the Remote,
+        and finally start a Task in the Event Loop to run the Remote.
+
+        :param AbstractEventLoop loop: An AsyncIO Event Loop, or an external
+            subclass thereof. The Loop on which to run the Remote.
+        :param int helpers: The number of Helper Tasks to be used by the Remote.
+            More Helpers can be useful when receiving prompts to perform very
+            await-heavy procedures, such as multiple file transfers, but when
+            not in use they mostly sap memory.
+        :param Union[float, int] timeout: The number of seconds to wait before
+            giving up on trying to connect.
+
+        :return: True if the Connection was successful, otherwise False.
+        """
         try:
             streams = await wait_for(
                 open_connection(self.addr, self.port, loop=loop), timeout
@@ -87,11 +110,14 @@ class Client:
                 self.remote.id
             ),
         )
-        self.listening = loop.create_task(self.remote.loop(helpers))
         await self._add_hooks()
+        self.listening = loop.create_task(self.remote.loop(helpers))
         return True
 
     async def disconnect(self):
+        """Forcibly break the Remote Connection. The Listening Task will be
+        cancelled and ``Remote.close()`` will be called.
+        """
         if self.listening:
             if not self.listening.done():
                 self.listening.cancel()
@@ -106,16 +132,33 @@ class Client:
                 self.remote = None
 
     async def terminate(self, reason: str = None):
+        """Politely close the Remote Connection. Calls ``Remote.terminate()``
+        and passes the Reason, if any, through.
+
+        :param str reason: An optional Message to be sent to the Remote, giving
+            the reason for the disconnect; For example, "Program Completed" or
+            "User Timed Out".
+        """
         try:
             await self.remote.terminate(reason)
             echo("dcon", "Connection terminated.")
         except:
             err("Skipping niceties.")
 
-    async def run_through(self, *coros, loop: AbstractEventLoop = None):
+    async def run_through(self, *coros: Callable, loop: AbstractEventLoop = None):
         """Construct a Coroutine that will sequentially run an arbitrary number
-            of other Coroutines, passed to this method. Then, run the newly
-            constructed Coroutine, while listening.
+        of other Coroutines passed to this method. Then, connect to the Remote
+        and run the newly constructed Coroutine.
+
+        Depending on your specific Project structure, this may be considered the
+        "entry point" of the Client.
+
+        :param Callable coros: Any number of Coroutines. They will be run, in
+            order, with the Client Instance passed in as the only Parameter. The
+            Client will then close.
+        :param AbstractEventLoop loop: An AsyncIO Event Loop, or an external
+            subclass thereof, such as a Qt Event Loop. This is the Event Loop
+            on which the entire Client and its Remote will run.
         """
         loop: AbstractEventLoop = loop or get_running_loop()
 
