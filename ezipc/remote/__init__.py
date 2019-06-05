@@ -41,11 +41,11 @@ from ..util import echo, err as err_, warn
 
 class Remote:
     def __init__(
-        self,
-        eventloop: AbstractEventLoop,
-        instr: StreamReader,
-        outstr: StreamWriter,
-        group: set = None,
+            self,
+            eventloop: AbstractEventLoop,
+            instr: StreamReader,
+            outstr: StreamWriter,
+            group: set = None,
     ):
         self.eventloop: AbstractEventLoop = eventloop
         self.instr: StreamReader = instr
@@ -287,36 +287,88 @@ class Remote:
             # Remove self from Client Set, if possible.
             self.group.remove(self)
 
-    async def helper(self, queue: Queue):
+    async def _helper(self):
+        """Repeatedly, forever, read a line from the Input Queue and put it
+            through the Processor. Provide a List to be filled with Tasks. Then,
+            when the Processing Coroutine finishes, Gather and Await all the
+            Tasks, if any, that have since accrued.
+        """
         while True:
-            line = await queue.get()
+            line = await self.lines.get()
             tasks: List[Task] = []
 
             try:
                 await self.process_line(line, tasks)
+                await gather(*tasks)
             except ConnectionError as e:
+                # Whatever just happened was too much to just die calmly. Close
+                #   down the entire Remote.
                 if self.open:
                     self.close()
                     echo("dcon", "Connection with {} closed: {}".format(self, e))
             finally:
-                await gather(*tasks)
-                queue.task_done()
+                self.lines.task_done()
 
-    async def loop(self, helper_count: int = 5):
+    async def _helper_helper(self, count: int):
+        """Spawn and manage Helper Tasks."""
         helpers = []
         try:
-            for _ in range(helper_count):
-                helpers.append(self.eventloop.create_task(self.helper(self.lines)))
+            # Create Tasks.
+            new = lambda: self.eventloop.create_task(self._helper())
+            for _ in range(count):
+                helpers.append(new())
 
+            def check():
+                for i, h in enumerate(helpers):
+                    if h.done():
+                        # Replace all Helpers that have stopped.
+                        e = h.exception()
+                        if e:
+                            err_("A Helper Task has died to an Exception:", e)
+                        else:
+                            err_("A Helper Task has died.")
+                        helpers[i] = new()
+
+            # Loop "forever", waiting for one to Raise. Note that we do NOT pass
+            #   ``return_exceptions`` to these ``gather()``s.
+            while True:
+                try:
+                    await gather(*helpers)
+                except:
+                    check()
+
+        finally:
+            # Kill Tasks.
+            g = gather(*helpers)
+            g.cancel()
+            await g
+
+    async def loop(self, helper_count: int = 5):
+        # Create a Task that creates Tasks.
+        helpline = self.eventloop.create_task(self._helper_helper(helper_count))
+
+        try:
             async for item in self.connection:
+                # Receive text from the Input Stream.
                 if isinstance(item, Exception):
+                    # If we received an Exception, the Decryption failed.
                     warn(
                         "Decryption from {} failed: {} - {}".format(
                             self, type(item).__name__, item
                         )
                     )
                 else:
+                    # Otherwise, add it to the Queue.
                     await self.lines.put(item)
+
+                # Double check that we are still listening.
+                if helpline.done():
+                    # Helper Helper has ended, for some reason.
+                    e = helpline.exception()
+                    if e:
+                        raise e
+                    else:
+                        break
 
         except IncompleteReadError:
             if self.open:
@@ -335,11 +387,10 @@ class Remote:
                 err_("Connection with {} failed:".format(self), e)
 
         finally:
+            helpline.cancel()
             self.close()
-            for helper in helpers:
-                helper.cancel()
+            await helpline
 
-            await gather(*helpers, return_exceptions=True)
 
     async def notif(self, meth: str, params: Union[dict, list] = None, nohandle: bool = False):
         """Assemble and send a JSON-RPC Notification with the given data."""
@@ -361,12 +412,12 @@ class Remote:
                 raise e
 
     async def request(
-        self,
-        meth: str,
-        params: Union[dict, list] = None,
-        *,
-        callback: Callable = None,
-        nohandle: bool = False
+            self,
+            meth: str,
+            params: Union[dict, list] = None,
+            *,
+            callback: Callable = None,
+            nohandle: bool = False
     ) -> Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
@@ -404,15 +455,15 @@ class Remote:
             return future
 
     async def request_wait(
-        self,
-        meth: str,
-        params: Union[dict, list] = None,
-        default: Any = None,
-        *,
-        callback: Callable = None,
-        nohandle: bool = False,
-        timeout: int = 10,
-        raise_remote_err: bool = False
+            self,
+            meth: str,
+            params: Union[dict, list] = None,
+            default: Any = None,
+            *,
+            callback: Callable = None,
+            nohandle: bool = False,
+            timeout: int = 10,
+            raise_remote_err: bool = False
     ):
         """Send a JSON-RPC Request with the given data, the same as
             `Remote.request()`. However, rather than return the Future, handle
@@ -442,13 +493,13 @@ class Remote:
             return future.result()
 
     async def respond(
-        self,
-        mid: str,
-        method: str = None,
-        *,
-        err: dict = None,
-        res: Union[dict, list] = None,
-        nohandle: bool = False
+            self,
+            mid: str,
+            method: str = None,
+            *,
+            err: dict = None,
+            res: Union[dict, list] = None,
+            nohandle: bool = False
     ):
         if not self.open:
             return

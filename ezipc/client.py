@@ -110,8 +110,8 @@ class Client:
                 self.remote.id
             ),
         )
-        await self._add_hooks()
         self.listening = loop.create_task(self.remote.loop(helpers))
+        await self._add_hooks()
         return True
 
     async def disconnect(self):

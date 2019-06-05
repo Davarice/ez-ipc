@@ -1,7 +1,6 @@
 import asyncio
 
-from .util.callbacks import callback_response
-from .util.output import echo, err, set_verbosity
+from .util import callback_response, cleanup, echo, err, set_verbosity
 
 
 def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
@@ -73,10 +72,8 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
 
     finally:
         try:
-            print("Cleaning up...")
             tasks = asyncio.Task.all_tasks()
-            for t in [t for t in tasks if not (t.done() or t.cancelled())]:
-                eventloop.run_until_complete(t)
+            eventloop.run_until_complete(cleanup(tasks))
         finally:
             eventloop.close()
 
