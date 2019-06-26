@@ -99,7 +99,7 @@ def echo(etype: str, text: Union[str, List[str]], color=""):
         P.emit(etype, text, color)
 
 
-def err(text: str, exc: Exception = None):
+def err(text: str, exc: BaseException = None):
     if exc:
         text += " {} - {}".format(type(exc).__name__, exc)
     echo("err", text, Color.RED)

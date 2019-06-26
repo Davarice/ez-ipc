@@ -36,11 +36,23 @@ __all__ = [
 
 class Server:
     """The Server is the component of the Client/Server Model that waits for
-        input from a Client, and then operates on it. The Server can interface
-        with multiple Clients at the same time, and may even facilitate
-        communications between two Clients.
+    input from a Client, and then operates on it. The Server can interface with
+    multiple Clients at the same time, and may even facilitate communications
+    between two Clients.
 
-    As the more passive component, the Server will spend most of its time waiting.
+    As the more passive component, the Server will spend most of its time
+    waiting for Clients.
+
+    :param str addr: IPv4 Address to listen on. If this is not supplied, and
+        ``autopublish`` is not `True`, ``127.0.0.1`` will be used.
+    :param int port: IP Port to listen on.
+    :param bool autopublish: If this is `True`, the Server will try to
+        automatically discover the Network Address of the local system. If it
+        cannot be found, ``addr`` will be used as a fallback.
+    :param int helpers: The number of Helper Tasks to be used by **each**
+        Remote. More Helpers can be useful when receiving prompts to perform
+        very await-heavy procedures, such as multiple file transfers, but when
+        not in use they mostly sap memory.
     """
 
     def __init__(self, addr: str = "", port: int = 9002, autopublish=False, helpers=5):
@@ -76,7 +88,7 @@ class Server:
         self.hooks_notif = {}
         self.hooks_request = {}
 
-    def _setup(self, *_a, **_kw):
+    def _add_hooks(self, *_a, **_kw):
         """Execute all prerequisites to running, before running. Meant to be
             overwritten by Subclasses.
         """
@@ -128,6 +140,7 @@ class Server:
             return
 
         if callback is None:
+
             @callback_response
             def cb_confirm(data, remote):
                 pass
@@ -135,9 +148,7 @@ class Server:
         remotes = self.remotes.copy()
         reqs = (
             self.eventloop.create_task(
-                r.request_wait(
-                    meth, params, default, callback=callback, **kw
-                )
+                r.request_wait(meth, params, default, callback=callback, **kw)
             )
             for r in remotes
         )
@@ -224,7 +235,7 @@ class Server:
         """Run alone and do nothing else. For very simple implementations that
             do not need to do anything else at the same time.
         """
-        self._setup(*a, **kw)
+        self._add_hooks(*a, **kw)
 
         try:
             run(self.run())
