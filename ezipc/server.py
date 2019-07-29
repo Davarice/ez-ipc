@@ -13,7 +13,7 @@ from asyncio import (
 from collections import Counter, Set
 from datetime import datetime as dt
 from socket import AF_INET, SOCK_DGRAM, socket
-from typing import Union
+from typing import Optional, Union
 
 from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
 from .util import callback_response, echo, err, P, warn
@@ -76,9 +76,9 @@ class Server:
         self.port: int = port
         self.helpers = helpers
 
-        self.eventloop: AbstractEventLoop = None
+        self.eventloop: Optional[AbstractEventLoop] = None
         self.remotes: set = set()
-        self.server: AbstractServer = None
+        self.server: Optional[AbstractServer] = None
         self.startup: dt = dt.utcnow()
 
         self.total_clients: int = 0
@@ -138,12 +138,6 @@ class Server:
     ):
         if not self.remotes:
             return
-
-        if callback is None:
-
-            @callback_response
-            def cb_confirm(data, remote):
-                pass
 
         remotes = self.remotes.copy()
         reqs = (
