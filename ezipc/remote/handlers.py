@@ -1,7 +1,7 @@
 from asyncio import Future
 from functools import wraps
 from os import strerror
-from typing import Callable, Tuple, TYPE_CHECKING, TypeVar, Union
+from typing import Callable, Coroutine, Tuple, TYPE_CHECKING, TypeVar, Union
 
 from .protocol import Errors
 from ..util import err
@@ -66,7 +66,13 @@ def request_handler(host: Remote, method: str) -> Callable:
             :param Remote remote: A Remote Object representing the IPC interface
                 to another, possibly non-local, Process.
             """
-            outcome: rpc_response = await coro(data, remote)
+            res: Union[Coroutine, rpc_response] = coro(data, remote)
+            while isinstance(res, Coroutine):
+                # This is *probably* a Coroutine, but it may just be a Function.
+                #   Check before blindly trying to Await.
+                res = await res
+            outcome: rpc_response = res
+
             try:
                 if outcome is not None:
                     if isinstance(outcome, int):
@@ -84,7 +90,7 @@ def request_handler(host: Remote, method: str) -> Callable:
                         return
 
                     elif isinstance(outcome, tuple):
-                        # Received multiple returns. The first should be a
+                        # Received multiple Returns. The first should be a
                         #   Status Code, but the rest will vary.
                         outcome: list = list(outcome)
                         code: int = outcome.pop(0)
@@ -192,17 +198,17 @@ def response_handler(
             return
         elif future.cancelled():
             # Cancelled? Dispatch. No args.
-            if cancel:
+            if cancel is not None:
                 cancel()
         else:
             ex = future.exception()
             if ex is None:
                 # No Exception? Dispatch the Result.
-                if win:
+                if win is not None:
                     win(future.result(), remote)
             else:
                 # Exception? Dispatch the Exception.
-                if fail:
+                if fail is not None:
                     fail(ex, remote)
 
     return callback

@@ -40,6 +40,13 @@ from ..util import echo, err as err_, warn
 
 
 class Remote:
+    """An abstraction representing the other end of some connection, as well as
+    the connection itself, to a point.
+
+    Initialized with an Async Event Loop, and the Reader and Writer of a Stream,
+    the Remote class provides a clean interface for reception and transmission
+    of data to a Remote Host.
+    """
     def __init__(
             self,
             eventloop: AbstractEventLoop,
@@ -70,7 +77,7 @@ class Remote:
         now = dt.utcnow()
         self.opened: dt = now
         self.startup: dt = now
-        self._add_default_hooks()
+        self._add_hooks()
 
     @property
     def host(self) -> str:
@@ -85,18 +92,18 @@ class Remote:
         return self.connection.open
 
     def __str__(self) -> str:
-        return "Remote " + self.id
+        return f"Remote {self.id}"
 
-    def _add_default_hooks(self):
+    def _add_hooks(self):
         """Add the initial hooks for the connection: Ping, and the two hooks
             required for an RSA Key Exchange.
         """
 
-        @request_handler(self, "PING")
-        async def cb_ping(data: dict, _remote: Remote) -> rpc_response:
+        @self.handle_request("PING")
+        def cb_ping(data: dict, _remote: Remote) -> rpc_response:
             return data.get("params", [])
 
-        @request_handler(self, "RSA.EXCH")
+        @self.handle_request("RSA.EXCH")
         async def cb_rsa_exchange(data: dict, remote: Remote) -> rpc_response:
             if remote.connection.can_encrypt:
                 echo(
@@ -112,7 +119,7 @@ class Remote:
                 err_("Cannot establish a Secure Connection.")
                 return 92, "Encryption Unavailable"
 
-        @request_handler(self, "RSA.CONF")
+        @self.handle_request("RSA.CONF")
         async def cb_rsa_confirm(data: dict, remote: Remote) -> rpc_response:
             if remote.connection.can_activate():
                 await remote.respond(data["id"], data["method"], res=[True])
@@ -122,7 +129,11 @@ class Remote:
                 return 1, "Cannot Activate"
 
     async def enable_rsa(self) -> bool:
-        if not self.connection.can_encrypt or self.connection.box:
+        if not self.connection.can_encrypt:
+            warn("Cannot enable RSA: Encryption is not available.")
+            return False
+        elif self.connection.box:
+            warn("Cannot enable RSA: Encryption is already in progress.")
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
@@ -152,6 +163,10 @@ class Remote:
             return line
 
     async def process_line(self, line: str, tasks: List[Task]):
+        """A line of data has been received. If it is a Response, get the Future
+        waiting for it and set its Result. Otherwise, find a Hook waiting for
+        the Method received, and run it.
+        """
         try:
             data = unpack(line)
         except JSONDecodeError as e:
@@ -254,7 +269,7 @@ class Remote:
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
         """
-        if func:
+        if func is not None:
             # Function provided. Hook it directly.
             self.hooks_notif[method] = func
         else:
@@ -268,7 +283,7 @@ class Remote:
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
         """
-        if func:
+        if func is not None:
             # Function provided. Hook it directly.
             self.hooks_request[method] = func
         else:
@@ -287,34 +302,35 @@ class Remote:
             # Remove self from Client Set, if possible.
             self.group.remove(self)
 
-    async def _helper(self):
-        """Repeatedly, forever, read a line from the Input Queue and put it
-            through the Processor. Provide a List to be filled with Tasks. Then,
-            when the Processing Coroutine finishes, Gather and Await all the
-            Tasks, if any, that have since accrued.
-        """
-        while True:
-            line = await self.lines.get()
-            tasks: List[Task] = []
-
-            try:
-                await self.process_line(line, tasks)
-                await gather(*tasks)
-            except ConnectionError as e:
-                # Whatever just happened was too much to just die calmly. Close
-                #   down the entire Remote.
-                if self.open:
-                    self.close()
-                    echo("dcon", "Connection with {} closed: {}".format(self, e))
-            finally:
-                self.lines.task_done()
-
-    async def _helper_helper(self, count: int):
+    async def run_helpers(self, count: int):
         """Spawn and manage Helper Tasks."""
-        helpers = []
+        helpers: List[Task] = []
+
+        async def _helper():
+            """Repeatedly, forever, read a line from the Input Queue and put it
+                through the Processor. Provide a List to be filled with Tasks.
+                Then, when the Processing Coroutine finishes, Gather and Await
+                all the Tasks, if any, that have since accrued.
+            """
+            while True:
+                line = await self.lines.get()
+                tasks: List[Task] = []
+
+                try:
+                    await self.process_line(line, tasks)
+                    await gather(*tasks)
+                except ConnectionError as e:
+                    # Whatever just happened was too much to just die calmly. Close
+                    #   down the entire Remote.
+                    if self.open:
+                        self.close()
+                        echo("dcon", "Connection with {} closed: {}".format(self, e))
+                finally:
+                    self.lines.task_done()
+
         try:
             # Create Tasks.
-            new = lambda: self.eventloop.create_task(self._helper())
+            new = lambda: self.eventloop.create_task(_helper())
             for _ in range(count):
                 helpers.append(new())
 
@@ -323,10 +339,10 @@ class Remote:
                     if h.done():
                         # Replace all Helpers that have stopped.
                         e = h.exception()
-                        if e:
-                            err_("A Helper Task has died to an Exception:", e)
-                        else:
+                        if e is None:
                             err_("A Helper Task has died.")
+                        else:
+                            err_("A Helper Task has died to an Exception:", e)
                         helpers[i] = new()
 
             # Loop "forever", waiting for one to Raise. Note that we do NOT pass
@@ -344,8 +360,11 @@ class Remote:
             await g
 
     async def loop(self, helper_count: int = 5):
+        """Listen on the Connection, and write data from it into the Queue to be
+        handled by Helper Tasks.
+        """
         # Create a Task that creates Tasks.
-        helpline = self.eventloop.create_task(self._helper_helper(helper_count))
+        helpline = self.eventloop.create_task(self.run_helpers(helper_count))
 
         try:
             async for item in self.connection:

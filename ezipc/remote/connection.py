@@ -4,7 +4,7 @@ try:
     import nacl.utils
     from nacl.exceptions import CryptoError
     from nacl.public import Box, PrivateKey, PublicKey
-except ImportError:
+except ImportError as ex:
     class CryptoError(Exception):
         pass
 
@@ -12,6 +12,8 @@ except ImportError:
     PrivateKey = None
     PublicKey = None
     can_encrypt = False
+
+    print("Encryption could not be enabled:", ex)
 else:
     can_encrypt = True
 
