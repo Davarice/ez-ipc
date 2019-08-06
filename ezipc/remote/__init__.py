@@ -47,12 +47,13 @@ class Remote:
     the Remote class provides a clean interface for reception and transmission
     of data to a Remote Host.
     """
+
     def __init__(
-            self,
-            eventloop: AbstractEventLoop,
-            instr: StreamReader,
-            outstr: StreamWriter,
-            group: set = None,
+        self,
+        eventloop: AbstractEventLoop,
+        instr: StreamReader,
+        outstr: StreamWriter,
+        group: set = None,
     ):
         self.eventloop: AbstractEventLoop = eventloop
         self.instr: StreamReader = instr
@@ -81,7 +82,7 @@ class Remote:
 
     @property
     def host(self) -> str:
-        return "{}:{}".format(self.addr, self.port)
+        return f"{self.addr}:{self.port}"
 
     @property
     def is_secure(self) -> bool:
@@ -170,17 +171,17 @@ class Remote:
         try:
             data = unpack(line)
         except JSONDecodeError as e:
-            warn("Invalid JSON received from {}.".format(self))
+            warn(f"Invalid JSON received from {self}.")
             await self.respond("0", err=Errors.parse_error(str(e)))
             return
         except UnicodeDecodeError:
-            warn("Corrupt data received from {}.".format(self))
+            warn(f"Corrupt data received from {self}.")
             return
 
         keys = list(data.keys())
         if verify_response(keys, data):
             # Message is a RESPONSE.
-            echo("recv", "Receiving a Response from {}...".format(self))
+            echo("recv", f"Receiving a Response from {self}...")
             self.total_recv["response"] += 1
             mid = data["id"]
             if mid in self.futures:
@@ -189,15 +190,9 @@ class Remote:
                 del self.futures[mid]
 
                 if future.done():
-                    warn(
-                        "Received a Response for a closed Future. UUID: {}".format(mid)
-                    )
+                    warn(f"Received a Response for a closed Future. UUID: {mid}")
                 elif future.cancelled():
-                    warn(
-                        "Received a Response for a cancelled Future. UUID: {}".format(
-                            mid
-                        )
-                    )
+                    warn(f"Received a Response for a cancelled Future. UUID: {mid}")
                 else:
                     # We need to fulfill this Future now.
                     if "error" in data:
@@ -214,14 +209,11 @@ class Remote:
                         future.set_result(data["result"])
             else:
                 # Nothing is waiting for this message. Make a note and move on.
-                warn("Received an unsolicited Response. UUID: {}".format(mid))
+                warn(f"Received an unsolicited Response. UUID: {mid}")
 
         elif verify_request(keys, data):
             # Message is a REQUEST.
-            echo(
-                "recv",
-                "Receiving a '{}' Request from {}...".format(data["method"], self),
-            )
+            echo("recv", f"Receiving a '{data['method']}' Request from {self}...")
             self.total_recv["request"] += 1
             if data["method"] in self.hooks_request:
                 # We know where to send this type of Request.
@@ -237,10 +229,7 @@ class Remote:
 
         elif verify_notif(keys, data):
             # Message is a NOTIFICATION.
-            echo(
-                "recv",
-                "Receiving a '{}' Notification from {}...".format(data["method"], self),
-            )
+            echo("recv", f"Receiving a '{data['method']}' Notification from {self}...")
             self.total_recv["notif"] += 1
             if data["method"] == "TERM":
                 # The connection is being explicitly terminated.
@@ -255,7 +244,7 @@ class Remote:
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.
-            echo("", "Received an invalid Message from {}".format(self))
+            echo("", f"Received an invalid Message from {self}")
             if "id" in data:
                 await self.respond(data["id"], err=Errors.invalid_request(keys))
 
@@ -324,7 +313,7 @@ class Remote:
                     #   down the entire Remote.
                     if self.open:
                         self.close()
-                        echo("dcon", "Connection with {} closed: {}".format(self, e))
+                        echo("dcon", f"Connection with {self} closed: {e}")
                 finally:
                     self.lines.task_done()
 
@@ -372,9 +361,7 @@ class Remote:
                 if isinstance(item, Exception):
                     # If we received an Exception, the Decryption failed.
                     warn(
-                        "Decryption from {} failed: {} - {}".format(
-                            self, type(item).__name__, item
-                        )
+                        f"Decryption from {self} failed: {type(item).__name__} - {item}"
                     )
                 else:
                     # Otherwise, add it to the Queue.
@@ -391,33 +378,34 @@ class Remote:
 
         except IncompleteReadError:
             if self.open:
-                err_("Connection with {} cut off.".format(self))
+                err_(f"Connection with {self} cut off.")
         except EOFError:
             if self.open:
-                err_("Connection with {} failed: Stream ended.".format(self))
+                err_(f"Connection with {self} failed: Stream ended.")
         except ConnectionError as e:
             if self.open:
-                echo("dcon", "Connection with {} closed: {}".format(self, e))
+                echo("dcon", f"Connection with {self} closed: {e}")
         except CancelledError:
             if self.open:
-                err_("Listening to {} was cancelled.".format(self))
+                err_(f"Listening to {self} was cancelled.")
         except Exception as e:
             if self.open:
-                err_("Connection with {} failed:".format(self), e)
+                err_(f"Connection with {self} failed:", e)
 
         finally:
             helpline.cancel()
             self.close()
             await helpline
 
-
-    async def notif(self, meth: str, params: Union[dict, list] = None, nohandle: bool = False):
+    async def notif(
+        self, meth: str, params: Union[dict, list] = None, nohandle: bool = False
+    ):
         """Assemble and send a JSON-RPC Notification with the given data."""
         if not self.open:
             return
 
         try:
-            echo("send", "Sending a '{}' Notification to {}.".format(meth, self))
+            echo("send", f"Sending a '{meth}' Notification to {self}.")
             self.total_sent["notif"] += 1
             if type(params) == dict:
                 await self.send(make_notif(meth, **params))
@@ -431,12 +419,12 @@ class Remote:
                 raise e
 
     async def request(
-            self,
-            meth: str,
-            params: Union[dict, list] = None,
-            *,
-            callback: Callable = None,
-            nohandle: bool = False
+        self,
+        meth: str,
+        params: Union[dict, list] = None,
+        *,
+        callback: Callable = None,
+        nohandle: bool = False,
     ) -> Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
@@ -448,7 +436,7 @@ class Remote:
             future.set_exception(ConnectionResetError)
             return future
 
-        echo("send", "Sending a '{}' Request to {}.".format(meth, self))
+        echo("send", f"Sending a '{meth}' Request to {self}.")
         self.total_sent["request"] += 1
 
         if type(params) == dict:
@@ -474,15 +462,15 @@ class Remote:
             return future
 
     async def request_wait(
-            self,
-            meth: str,
-            params: Union[dict, list] = None,
-            default: Any = None,
-            *,
-            callback: Callable = None,
-            nohandle: bool = False,
-            timeout: int = 10,
-            raise_remote_err: bool = False
+        self,
+        meth: str,
+        params: Union[dict, list] = None,
+        default: Any = None,
+        *,
+        callback: Callable = None,
+        nohandle: bool = False,
+        timeout: int = 10,
+        raise_remote_err: bool = False,
     ):
         """Send a JSON-RPC Request with the given data, the same as
             `Remote.request()`. However, rather than return the Future, handle
@@ -505,20 +493,20 @@ class Remote:
             else:
                 return default
         except (TimeoutError, CancelledError):
-            warn("{} Request timed out.".format(meth))
+            warn(f"{meth} Request timed out.")
             return default
 
         else:
             return future.result()
 
     async def respond(
-            self,
-            mid: str,
-            method: str = None,
-            *,
-            err: dict = None,
-            res: Union[dict, list] = None,
-            nohandle: bool = False
+        self,
+        mid: str,
+        method: str = None,
+        *,
+        err: dict = None,
+        res: Union[dict, list] = None,
+        nohandle: bool = False,
     ):
         if not self.open:
             return
@@ -527,7 +515,7 @@ class Remote:
             "send",
             "Sending {}{} to {}.".format(
                 "an Error Response" if err else "a Result Response",
-                " for '{}'".format(method) if method else "",
+                f" for '{method}'" if method else "",
                 self,
             ),
         )
