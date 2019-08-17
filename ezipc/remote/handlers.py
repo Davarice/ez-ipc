@@ -15,7 +15,7 @@ else:
 dl = TypeVar("dl", dict, list)
 
 # Return Type Union, provided for Linting/SCA purposes.
-rpc_response = Union[
+rpc_response: type = Union[
     None,  # Send no Response.
     int,  # Send a very basic Response. 0 for Result, nonzero for Error.
     dl,  # Send an implicit Result Response with Data.

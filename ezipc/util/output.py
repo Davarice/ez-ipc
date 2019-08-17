@@ -1,6 +1,7 @@
 """Module defining functions for printing to the Console."""
 
 from datetime import datetime as dt
+from logging import DEBUG, Formatter, getLogger, StreamHandler
 from typing import Callable, Dict, List, Tuple, Union
 
 
@@ -20,6 +21,19 @@ except ImportError:
 T = Terminal()
 Color = T
 colors: Dict[str, Tuple[Callable[[str], str], str, int]] = {}
+
+fmt = Formatter("<%(asctime)s.%(msecs)d> :: %(name)s // %(levelname)s: %(message)s", "%H:%M:%S")
+
+ch = StreamHandler()
+ch.setFormatter(fmt)
+
+fmt.msec_format = "%s.%02d"
+
+def newLogger(name: str = ""):
+    logger = getLogger(name.upper())
+    logger.addHandler(ch)
+    logger.setLevel(DEBUG)
+    return logger
 
 
 def set_colors(use_real: bool):

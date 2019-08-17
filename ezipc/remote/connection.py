@@ -1,7 +1,7 @@
 from asyncio import StreamReader, StreamWriter
+from typing import Optional
 
 try:
-    import nacl.utils
     from nacl.exceptions import CryptoError
     from nacl.public import Box, PrivateKey, PublicKey
 except ImportError as ex:
@@ -11,11 +11,11 @@ except ImportError as ex:
     Box = None
     PrivateKey = None
     PublicKey = None
-    can_encrypt = False
+    can_encrypt: bool = False
 
     print("Encryption could not be enabled:", ex)
 else:
-    can_encrypt = True
+    can_encrypt: bool = True
 
 
 sep = b"\n"*5
@@ -26,19 +26,19 @@ class Connection:
         self.instr: StreamReader = instr
         self.outstr: StreamWriter = outstr
 
-        self.can_encrypt = can_encrypt
-        self.open = True
+        self.can_encrypt: bool = can_encrypt
+        self.open: bool = True
 
         self._key: PrivateKey = PrivateKey.generate() if self.can_encrypt else None
         self.key_other: PublicKey = None
         self._box: Box = None
         self.box: Box = None
 
-        self.total_sent = 0
-        self.total_recv = 0
+        self.total_sent: int = 0
+        self.total_recv: int = 0
 
     @property
-    def key(self):
+    def key(self) -> Optional[str]:
         return bytes(self._key.public_key).hex() if self.can_encrypt else None
 
     def close(self):
@@ -78,7 +78,7 @@ class Connection:
     async def read(self) -> str:
         ctext: bytes = await self.instr.readuntil(sep)
         self.total_recv += len(ctext)
-        ptext: str = self._decrypt(ctext[:-len(sep)])
+        ptext: str = self._decrypt(ctext[:-len(sep)]).decode()
         return ptext
 
     async def write(self, ptext: str) -> int:

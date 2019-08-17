@@ -95,7 +95,7 @@ class Remote:
     def __str__(self) -> str:
         return f"Remote {self.id}"
 
-    def _add_hooks(self):
+    def _add_hooks(self) -> None:
         """Add the initial hooks for the connection: Ping, and the two hooks
             required for an RSA Key Exchange.
         """
@@ -163,7 +163,7 @@ class Remote:
         else:
             return line
 
-    async def process_line(self, line: str, tasks: List[Task]):
+    async def process_line(self, line: str, tasks: List[Task]) -> None:
         """A line of data has been received. If it is a Response, get the Future
         waiting for it and set its Result. Otherwise, find a Hook waiting for
         the Method received, and run it.
@@ -268,7 +268,7 @@ class Remote:
 
             return hook
 
-    def hook_request(self, method: str, func=None):
+    def hook_request(self, method: str, func=None) -> Callable:
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
         """
@@ -282,7 +282,7 @@ class Remote:
 
             return hook
 
-    def close(self):
+    def close(self) -> None:
         self.total_recv["byte"] = self.connection.total_recv
         self.total_sent["byte"] = self.connection.total_sent
         self.connection.close()
@@ -291,7 +291,7 @@ class Remote:
             # Remove self from Client Set, if possible.
             self.group.remove(self)
 
-    async def run_helpers(self, count: int):
+    async def run_helpers(self, count: int) -> None:
         """Spawn and manage Helper Tasks."""
         helpers: List[Task] = []
 
@@ -302,7 +302,7 @@ class Remote:
                 all the Tasks, if any, that have since accrued.
             """
             while True:
-                line = await self.lines.get()
+                line: str = await self.lines.get()
                 tasks: List[Task] = []
 
                 try:
@@ -348,7 +348,7 @@ class Remote:
             g.cancel()
             await g
 
-    async def loop(self, helper_count: int = 5):
+    async def loop(self, helper_count: int = 5) -> None:
         """Listen on the Connection, and write data from it into the Queue to be
         handled by Helper Tasks.
         """
@@ -399,7 +399,7 @@ class Remote:
 
     async def notif(
         self, meth: str, params: Union[dict, list] = None, nohandle: bool = False
-    ):
+    ) -> None:
         """Assemble and send a JSON-RPC Notification with the given data."""
         if not self.open:
             return
@@ -450,6 +450,7 @@ class Remote:
 
         if callback:
             cb = partial(callback, remote=self)
+            # noinspection PyTypeChecker
             future.add_done_callback(cb)
 
         try:
@@ -471,7 +472,7 @@ class Remote:
         nohandle: bool = False,
         timeout: int = 10,
         raise_remote_err: bool = False,
-    ):
+    ) -> Any:
         """Send a JSON-RPC Request with the given data, the same as
             `Remote.request()`. However, rather than return the Future, handle
             it, and return None if the request timed out or (unless specified)
@@ -507,7 +508,7 @@ class Remote:
         err: dict = None,
         res: Union[dict, list] = None,
         nohandle: bool = False,
-    ):
+    ) -> None:
         if not self.open:
             return
 
@@ -529,13 +530,13 @@ class Remote:
             if nohandle:
                 raise e
 
-    async def send(self, data: str):
+    async def send(self, data: str) -> None:
         if not self.open:
             return
 
         await self.connection.write(data)
 
-    async def terminate(self, reason: str = None):
+    async def terminate(self, reason: str = None) -> None:
         if not self.open:
             return
 

@@ -8,7 +8,7 @@ from asyncio import (
     wait_for,
 )
 from datetime import datetime as dt
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
 from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
 from .util import callback_response, echo, err, P, warn
@@ -48,9 +48,9 @@ class Client:
         self.addr: str = addr
         self.port: int = port
 
-        self.eventloop: AbstractEventLoop = None
-        self.remote: Remote = None
-        self.listening: Task = None
+        self.eventloop: Optional[AbstractEventLoop] = None
+        self.remote: Optional[Remote] = None
+        self.listening: Optional[Task] = None
 
         self.startup: dt = dt.utcnow()
 
@@ -121,7 +121,7 @@ class Client:
         if self.listening:
             if not self.listening.done():
                 self.listening.cancel()
-            self.listening: Task = None
+            self.listening: Optional[Task] = None
 
         if self.alive:
             try:
