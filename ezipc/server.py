@@ -7,13 +7,14 @@ from asyncio import (
     start_server,
     StreamReader,
     StreamWriter,
+    Task,
     TimeoutError,
     wait_for,
 )
 from collections import Counter, Set
 from datetime import datetime as dt
 from socket import AF_INET, SOCK_DGRAM, socket
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
 from .util import callback_response, echo, err, P, warn
@@ -134,25 +135,36 @@ class Server:
         default=None,
         *,
         callback=None,
-        **kw
-    ):
+        **kw,
+    ) -> Dict[Remote, Task]:
         if not self.remotes:
-            return
+            return {}
 
-        remotes = self.remotes.copy()
-        reqs = (
-            self.eventloop.create_task(
+        reqs = {
+            r: self.eventloop.create_task(
                 r.request_wait(meth, params, default, callback=callback, **kw)
             )
-            for r in remotes
-        )
+            for r in self.remotes
+        }
+        return reqs
 
-        wins = await gather(*reqs, return_exceptions=True)
-        total = len(remotes)
+    async def broadcast_wait(
+        self,
+        meth: str,
+        params: Union[dict, list] = None,
+        default=None,
+        *,
+        callback=None,
+        **kw,
+    ):
+        reqs = await self.broadcast(meth, params, default, callback=callback, **kw)
+
+        wins = await gather(*reqs.values(), return_exceptions=True)
+        total = len(reqs)
         wincount = total - wins.count(None)
 
-        echo("win", "Messages successfully Broadcast: {}/{}".format(wincount, total))
-        return list(zip(map(str, remotes), wins))
+        echo("win", f"Messages successfully Broadcast: {wincount}/{total}")
+        return list(zip(reqs.keys(), wins))
 
     def drop(self, remote: Remote):
         self.total_sent.update(remote.total_sent)
@@ -160,14 +172,14 @@ class Server:
         self.remotes.remove(remote)
 
     async def encrypt_remote(self, remote: Remote):
-        echo("info", "Starting Secure Connection with {}...".format(remote))
+        echo("info", f"Starting Secure Connection with {remote}...")
         try:
             if await wait_for(remote.enable_rsa(), 10):
-                echo("win", "Secure Connection established with {}.".format(remote))
+                echo("win", f"Secure Connection established with {remote}.")
             else:
-                warn("Failed to establish Secure Connection with {}.".format(remote))
+                warn(f"Failed to establish Secure Connection with {remote}.")
         except TimeoutError:
-            warn("Encryption Request to {} timed out.".format(remote))
+            warn(f"Encryption Request to {remote} timed out.")
 
     async def terminate(self, reason: str = "Server Closing"):
         for remote in self.remotes:
@@ -182,9 +194,8 @@ class Server:
         """Callback executed by AsyncIO when a Client contacts the Server."""
         echo(
             "con",
-            "Incoming Connection from Client at `{}`.".format(
-                str_out.get_extra_info("peername", ("Unknown Address", 0))[0]
-            ),
+            f"Incoming Connection from Client at "
+            f"`{str_out.get_extra_info('peername', ('Unknown Address', 0))[0]}`.",
         )
         remote = Remote(self.eventloop, str_in, str_out)
         self.total_clients += 1
@@ -195,17 +206,20 @@ class Server:
         remote.startup = self.startup
 
         self.remotes.add(remote)
-        echo(
-            "diff",
-            "Client at {} has been assigned UUID {}.".format(remote.host, remote.id),
-        )
+        echo("diff", f"Client at {remote.host} has been assigned UUID {remote.id}.")
 
+        # Encrypt the Remote Connection.
         rsa = self.eventloop.create_task(self.encrypt_remote(remote))
         try:
+            # Run the Remote Loop Coroutine. While this runs, messages received
+            #   from the Remote Client are added to the Queue of the Remote
+            #   object. This Coroutine also dispatches other Tasks to handle the
+            #   received messages.
             await remote.loop(self.helpers)
 
         finally:
             try:
+                # Try not to drop the remote before the RSA Handshake is done.
                 await wait_for(rsa, 3)
             except TimeoutError:
                 pass
@@ -218,7 +232,7 @@ class Server:
         """
         self.eventloop = loop or get_event_loop()
 
-        echo("info", "Running Server on {}:{}".format(self.addr, self.port))
+        echo("info", f"Running Server on {self.addr}:{self.port}")
         self.server = await start_server(
             self.open_connection, self.addr, self.port, loop=self.eventloop
         )
@@ -246,25 +260,18 @@ class Server:
             try:
                 echo(
                     "info",
-                    "Served {} Clients in {}.".format(
-                        self.total_clients, str(dt.utcnow() - self.startup)[:-7]
-                    ),
+                    f"Served {self.total_clients} Clients in"
+                    f" {str(dt.utcnow() - self.startup)[:-7]}.",
                 )
                 echo("info", "Sent:")
                 echo(
                     "tab",
-                    [
-                        "> {} {}s".format(v, k.capitalize())
-                        for k, v in self.total_sent.items()
-                    ],
+                    [f"> {v} {k.capitalize()}s" for k, v in self.total_sent.items()],
                 )
                 echo("info", "Received:")
                 echo(
                     "tab",
-                    [
-                        "> {} {}s".format(v, k.capitalize())
-                        for k, v in self.total_recv.items()
-                    ],
+                    [f"> {v} {k.capitalize()}s" for k, v in self.total_recv.items()],
                 )
             except Exception:
                 return
