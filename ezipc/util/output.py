@@ -77,14 +77,7 @@ class _Printer:
             )
         if pri <= self.verbosity:
             self.output_line(
-                # TODO: Decide which of these is better
-                "<{}> {} {}".format(  # One Time format
-                    # "<{} | {}> {} {}".format(  # Two Times format
-                    str(now)[11:-4],  # Current Time
-                    # str(now - self.startup)[:-7],  # Server Uptime
-                    p_color(prefix),
-                    (color or NOCOLOR)(str(text)),
-                )
+                f"<{str(now)[11:-4]}> {p_color(prefix)} {(color or NOCOLOR)(str(text))}"
             )
 
 
@@ -104,7 +97,7 @@ def echo(etype: str, text: Union[str, List[str]] = None, color=""):
 
 def err(text: str, exc: BaseException = None):
     if exc is not None:
-        text += " {} - {}".format(type(exc).__name__, exc)
+        text += f" {type(exc).__name__} - {exc}"
     echo("err", text, Color.red)
 
 

@@ -13,7 +13,7 @@ from asyncio import (
 )
 from collections import Counter, Set
 from datetime import datetime as dt
-from functools import partial
+from functools import partial, wraps
 from socket import AF_INET, SOCK_DGRAM, socket
 from typing import Dict, Optional, Union
 
@@ -57,7 +57,13 @@ class Server:
         not in use they mostly sap memory.
     """
 
-    def __init__(self, addr: str = "", port: int = 9002, autopublish=False, helpers=5):
+    def __init__(
+        self,
+        addr: str = "",
+        port: int = 9002,
+        autopublish: bool = False,
+        helpers: int = 5,
+    ):
         if autopublish:
             # Override the passed parameter and try to autofind the address.
             sock = socket(AF_INET, SOCK_DGRAM)
@@ -90,16 +96,17 @@ class Server:
         self.hooks_notif = {}
         self.hooks_request = {}
 
-    def _add_hooks(self, *_a, **_kw):
+    def setup(self, *_a, **_kw):
         """Execute all prerequisites to running, before running. Meant to be
             overwritten by Subclasses.
         """
 
         @self.hook_request("TIME")
-        async def cb_time(data, conn: Remote):
-            await conn.respond(
-                data.get("id", "0"), res={"startup": self.startup.timestamp()}
-            )
+        async def cb_time(data):
+            # await conn.respond(
+            #     data.get("id", "0"), res={"startup": self.startup.timestamp()}
+            # )
+            return {"startup": self.startup.timestamp()}
 
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
@@ -123,19 +130,28 @@ class Server:
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
         """
-        if func:
-            # Function provided. Hook it directly.
-            self.hooks_request[method] = func
-            return func
-        else:
+        if func is None:
             # Function NOT provided. Return a Decorator.
             return partial(self.hook_request, method)
+        else:
+            # Function provided. Hook it directly.
+            @wraps(func)
+            async def handler(data: dict, conn: Remote):
+                try:
+                    res = await func(data.get("params", None))
+                except Exception as e:
+                    await conn.respond(
+                        data.get("id", "0"),
+                        data.get("method", "NONE"),
+                        err={"code": type(e).__name__, "message": str(e), "data": e.args},
+                    )
+                else:
+                    await conn.respond(
+                        data.get("id", "0"), data.get("method", "NONE"), res=res
+                    )
 
-            # def hook(func_):
-            #     self.hooks_request[method] = func_
-            #     return func_
-            #
-            # return hook
+            self.hooks_request[method] = handler
+            return func
 
     async def broadcast(
         self,
@@ -210,9 +226,9 @@ class Server:
         self.total_clients += 1
 
         # Update the Client Hooks with our own.
-        remote.hooks_notif.update(self.hooks_notif)
-        # remote.hooks_request.update(self.hooks_request)
-        remote.hooks_request = self.hooks_request
+        remote.hooks_notif_inher = self.hooks_notif
+        remote.hooks_request_inher = self.hooks_request
+
         remote.startup = self.startup
 
         self.remotes.add(remote)
@@ -253,7 +269,7 @@ class Server:
         """Run alone and do nothing else. For very simple implementations that
             do not need to do anything else at the same time.
         """
-        self._add_hooks(*a, **kw)
+        self.setup(*a, **kw)
 
         try:
             run(self.run())

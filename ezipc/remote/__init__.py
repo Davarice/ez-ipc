@@ -62,7 +62,11 @@ class Remote:
         self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
 
         self.hooks_notif: Dict[str, Callable] = {}
+        self.hooks_notif_inher: Dict[str, Callable] = {}
+
         self.hooks_request: Dict[str, Callable] = {}
+        self.hooks_request_inher: Dict[str, Callable] = {}
+
         self.futures: Dict[str, Future] = {}
 
         self.lines: Queue = Queue()
@@ -217,9 +221,13 @@ class Remote:
             # Message is a REQUEST.
             echo("recv", f"Receiving a '{data['method']}' Request from {self}...")
             self.total_recv["request"] += 1
-            if data["method"] in self.hooks_request:
+
+            hooks = self.hooks_request.copy()
+            hooks.update(self.hooks_request_inher)
+
+            if data["method"] in hooks:
                 # We know where to send this type of Request.
-                func = self.hooks_request[data["method"]]
+                func = hooks[data["method"]]
                 # await func(data, self)
                 tsk = self.eventloop.create_task(func(data, self))
                 tasks.append(tsk)
@@ -233,14 +241,18 @@ class Remote:
             # Message is a NOTIFICATION.
             echo("recv", f"Receiving a '{data['method']}' Notification from {self}...")
             self.total_recv["notif"] += 1
+
+            hooks = self.hooks_notif.copy()
+            hooks.update(self.hooks_notif_inher)
+
             if data["method"] == "TERM":
                 # The connection is being explicitly terminated.
                 raise ConnectionResetError(
                     data["params"]["reason"] or "Connection terminated by peer."
                 )
-            elif data["method"] in self.hooks_notif:
+            elif data["method"] in hooks:
                 # We know where to send this type of Notification.
-                func = self.hooks_notif[data["method"]]
+                func = hooks[data["method"]]
                 tasks.append(self.eventloop.create_task(func(data, self)))
 
         else:
