@@ -182,7 +182,7 @@ class Remote:
             warn(f"Corrupt data received from {self}.")
             return
 
-        echo("info", repr(data))
+        # echo("info", repr(data))
 
         keys = list(data.keys())
         if verify_response(keys, data):
