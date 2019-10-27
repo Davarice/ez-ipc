@@ -102,29 +102,27 @@ class Server:
         """
 
         @self.hook_request("TIME")
-        async def cb_time(data):
-            # await conn.respond(
-            #     data.get("id", "0"), res={"startup": self.startup.timestamp()}
-            # )
+        async def cb_time(*_):
             return {"startup": self.startup.timestamp()}
 
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
         """
-        if func:
-            # Function provided. Hook it directly.
-            self.hooks_notif[method] = func
-            return func
-        else:
+        if func is None:
             # Function NOT provided. Return a Decorator.
             return partial(self.hook_notif, method)
+        else:
+            # Function provided. Hook it directly.
+            @wraps(func)
+            async def handler(data: dict, _conn: Remote):
+                try:
+                    await func(data.get("params", None))
+                except Exception as e:
+                    err(f"Notification raised Exception", e)
 
-            # def hook(func_):
-            #     self.hooks_notif[method] = func_
-            #     return func_
-            #
-            # return hook
+            self.hooks_notif[method] = handler
+            return func
 
     def hook_request(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Requests of the
