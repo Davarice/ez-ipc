@@ -91,7 +91,10 @@ class _Printer:
 P = _Printer()
 
 
-def echo(etype: str, text: Union[str, List[str]], color=""):
+def echo(etype: str, text: Union[str, List[str]] = None, color=""):
+    if text is None:
+        etype, text = "info", etype
+
     if type(text) == list:
         for line in text:
             P.emit(etype, line, color)

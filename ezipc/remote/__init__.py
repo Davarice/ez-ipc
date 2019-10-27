@@ -23,6 +23,7 @@ from json import JSONDecodeError
 from typing import Any, Callable, Dict, List, Union
 from uuid import uuid4
 
+from ..util import echo, err as err_, warn
 from .connection import can_encrypt, Connection
 from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
@@ -36,7 +37,6 @@ from .protocol import (
     verify_request,
     verify_response,
 )
-from ..util import echo, err as err_, warn
 
 
 class Remote:
@@ -178,6 +178,8 @@ class Remote:
             warn(f"Corrupt data received from {self}.")
             return
 
+        echo("info", repr(data))
+
         keys = list(data.keys())
         if verify_response(keys, data):
             # Message is a RESPONSE.
@@ -265,6 +267,7 @@ class Remote:
             # Function NOT provided. Return a Decorator.
             def hook(func_):
                 self.hooks_notif[method] = func_
+                return func_
 
             return hook
 
@@ -279,6 +282,7 @@ class Remote:
             # Function NOT provided. Return a Decorator.
             def hook(func_):
                 self.hooks_request[method] = func_
+                return func_
 
             return hook
 

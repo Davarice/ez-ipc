@@ -13,6 +13,7 @@ from asyncio import (
 )
 from collections import Counter, Set
 from datetime import datetime as dt
+from functools import partial
 from socket import AF_INET, SOCK_DGRAM, socket
 from typing import Dict, Optional, Union
 
@@ -107,12 +108,16 @@ class Server:
         if func:
             # Function provided. Hook it directly.
             self.hooks_notif[method] = func
+            return func
         else:
             # Function NOT provided. Return a Decorator.
-            def hook(func_):
-                self.hooks_notif[method] = func_
+            return partial(self.hook_notif, method)
 
-            return hook
+            # def hook(func_):
+            #     self.hooks_notif[method] = func_
+            #     return func_
+            #
+            # return hook
 
     def hook_request(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Requests of the
@@ -121,12 +126,16 @@ class Server:
         if func:
             # Function provided. Hook it directly.
             self.hooks_request[method] = func
+            return func
         else:
             # Function NOT provided. Return a Decorator.
-            def hook(func_):
-                self.hooks_request[method] = func_
+            return partial(self.hook_request, method)
 
-            return hook
+            # def hook(func_):
+            #     self.hooks_request[method] = func_
+            #     return func_
+            #
+            # return hook
 
     async def broadcast(
         self,
@@ -202,7 +211,8 @@ class Server:
 
         # Update the Client Hooks with our own.
         remote.hooks_notif.update(self.hooks_notif)
-        remote.hooks_request.update(self.hooks_request)
+        # remote.hooks_request.update(self.hooks_request)
+        remote.hooks_request = self.hooks_request
         remote.startup = self.startup
 
         self.remotes.add(remote)
