@@ -8,6 +8,7 @@ from asyncio import (
     wait_for,
 )
 from datetime import datetime as dt
+from functools import partial, wraps
 from typing import Callable, Optional, Union
 
 from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
@@ -54,12 +55,15 @@ class Client:
 
         self.startup: dt = dt.utcnow()
 
+        self.hooks_notif = {}
+        self.hooks_request = {}
+
     @property
     def alive(self) -> bool:
         """Determine whether the Remote is still connected."""
         return bool(self.remote and not self.remote.outstr.is_closing())
 
-    async def _add_hooks(self):
+    async def setup(self):
         response = await self.remote.request_wait("TIME")
 
         if response:
@@ -70,6 +74,52 @@ class Client:
                 echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
         else:
             warn("Failed to get Server Uptime.")
+
+    def hook_notif(self, method: str, func=None):
+        """Signal to the Remote that `func` is waiting for Notifications of the
+            provided `method` value.
+        """
+        if func is None:
+            # Function NOT provided. Return a Decorator.
+            return partial(self.hook_notif, method)
+        else:
+            # Function provided. Hook it directly.
+            @wraps(func)
+            async def handler(data: dict, _conn: Remote):
+                try:
+                    await func(data.get("params", None))
+                except Exception as e:
+                    err(f"Notification raised Exception:", e)
+
+            self.hooks_notif[method] = handler
+            return func
+
+    def hook_request(self, method: str, func=None):
+        """Signal to the Remote that `func` is waiting for Requests of the
+            provided `method` value.
+        """
+        if func is None:
+            # Function NOT provided. Return a Decorator.
+            return partial(self.hook_request, method)
+        else:
+            # Function provided. Hook it directly.
+            @wraps(func)
+            async def handler(data: dict, conn: Remote):
+                try:
+                    res = await func(data.get("params", None))
+                except Exception as e:
+                    await conn.respond(
+                        data.get("id", "0"),
+                        data.get("method", "NONE"),
+                        err={"code": type(e).__name__, "message": str(e), "data": e.args},
+                    )
+                else:
+                    await conn.respond(
+                        data.get("id", "0"), data.get("method", "NONE"), res=res
+                    )
+
+            self.hooks_request[method] = handler
+            return func
 
     async def connect(
         self, loop: AbstractEventLoop, helpers: int = 5, timeout: Union[float, int] = 10
@@ -104,6 +154,8 @@ class Client:
             return False
 
         self.remote = Remote(loop, *streams)
+        self.remote.hooks_notif_inher = self.hooks_notif
+        self.remote.hooks_request_inher = self.hooks_request
         echo(
             "con",
             "Connected to Host. Server has been given the alias '{}'.".format(
@@ -111,7 +163,7 @@ class Client:
             ),
         )
         self.listening = loop.create_task(self.remote.loop(helpers))
-        await self._add_hooks()
+        await self.setup()
         return True
 
     async def disconnect(self):

@@ -23,7 +23,7 @@ from json import JSONDecodeError
 from typing import Any, Callable, Dict, List, Union
 from uuid import uuid4
 
-from ..util import echo, err as err_, warn
+from ..util.output import echo, err as err_, hl_method, hl_remote, T, warn
 from .connection import can_encrypt, Connection
 from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
@@ -97,6 +97,10 @@ class Remote:
         return self.connection.open
 
     def __str__(self) -> str:
+        return f"Remote {hl_remote(self.id)}"
+
+    @property
+    def name(self) -> str:
         return f"Remote {self.id}"
 
     def _add_hooks(self) -> None:
@@ -195,10 +199,10 @@ class Remote:
                 future: Future = self.futures[mid]
                 del self.futures[mid]
 
-                if future.done():
-                    warn(f"Received a Response for a closed Future. UUID: {mid}")
-                elif future.cancelled():
+                if future.cancelled():
                     warn(f"Received a Response for a cancelled Future. UUID: {mid}")
+                elif future.done():
+                    warn(f"Received a Response for a closed Future. UUID: {mid}")
                 else:
                     # We need to fulfill this Future now.
                     if "error" in data:
@@ -219,7 +223,7 @@ class Remote:
 
         elif verify_request(keys, data):
             # Message is a REQUEST.
-            echo("recv", f"Receiving a '{data['method']}' Request from {self}...")
+            echo("recv", f"Receiving a {hl_method(data['method'])} Request from {self}...")
             self.total_recv["request"] += 1
 
             hooks = self.hooks_request.copy()
@@ -239,7 +243,7 @@ class Remote:
 
         elif verify_notif(keys, data):
             # Message is a NOTIFICATION.
-            echo("recv", f"Receiving a '{data['method']}' Notification from {self}...")
+            echo("recv", f"Receiving a {hl_method(data['method'])} Notification from {self}...")
             self.total_recv["notif"] += 1
 
             hooks = self.hooks_notif.copy()
@@ -271,6 +275,9 @@ class Remote:
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
+
+        The provided Function should take two arguments: The first is the Data
+            of the Notification, and the second is the Remote.
         """
         if func is not None:
             # Function provided. Hook it directly.
@@ -286,6 +293,9 @@ class Remote:
     def hook_request(self, method: str, func=None) -> Callable:
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
+
+        The provided Function should take two arguments: The first is the Data
+            of the Request, and the second is the Remote.
         """
         if func is not None:
             # Function provided. Hook it directly.
@@ -377,7 +387,8 @@ class Remote:
                 if isinstance(item, Exception):
                     # If we received an Exception, the Decryption failed.
                     warn(
-                        f"Decryption from {self} failed: {type(item).__name__} - {item}"
+                        f"Decryption from {self.name} failed:"
+                        f" {type(item).__name__} - {item}"
                     )
                 else:
                     # Otherwise, add it to the Queue.
@@ -394,19 +405,19 @@ class Remote:
 
         except IncompleteReadError:
             if self.open:
-                err_(f"Connection with {self} cut off.")
+                err_(f"Connection with {self.name} cut off.")
         except EOFError:
             if self.open:
-                err_(f"Connection with {self} failed: Stream ended.")
+                err_(f"Connection with {self.name} failed: Stream ended.")
         except ConnectionError as e:
             if self.open:
                 echo("dcon", f"Connection with {self} closed: {e}")
         except CancelledError:
             if self.open:
-                err_(f"Listening to {self} was cancelled.")
+                err_(f"Listening to {self.name} was cancelled.")
         except Exception as e:
             if self.open:
-                err_(f"Connection with {self} failed:", e)
+                err_(f"Connection with {self.name} failed:", e)
 
         finally:
             helpline.cancel()
@@ -421,7 +432,7 @@ class Remote:
             return
 
         try:
-            echo("send", f"Sending a '{meth}' Notification to {self}.")
+            echo("send", f"Sending a {hl_method(meth)} Notification to {self}.")
             self.total_sent["notif"] += 1
             if type(params) == dict:
                 await self.send(make_notif(meth, **params))
@@ -452,7 +463,7 @@ class Remote:
             future.set_exception(ConnectionResetError)
             return future
 
-        echo("send", f"Sending a '{meth}' Request to {self}.")
+        echo("send", f"Sending {hl_method(meth)} Request to {self}.")
         self.total_sent["request"] += 1
 
         if type(params) == dict:
@@ -509,7 +520,7 @@ class Remote:
                 raise e
             else:
                 return default
-        except (TimeoutError, CancelledError):
+        except (CancelledError, TimeoutError):
             warn(f"{meth} Request timed out.")
             return default
 
@@ -532,7 +543,7 @@ class Remote:
             "send",
             "Sending {}{} to {}.".format(
                 "an Error Response" if err else "a Result Response",
-                f" for '{method}'" if method else "",
+                f" for {hl_method(method)}" if method else "",
                 self,
             ),
         )

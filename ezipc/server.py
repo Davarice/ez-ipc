@@ -1,6 +1,7 @@
 from asyncio import (
     AbstractEventLoop,
     AbstractServer,
+    CancelledError,
     gather,
     get_event_loop,
     run,
@@ -14,6 +15,7 @@ from asyncio import (
 from collections import Counter, Set
 from datetime import datetime as dt
 from functools import partial, wraps
+from inspect import signature
 from socket import AF_INET, SOCK_DGRAM, socket
 from typing import Dict, Optional, Union
 
@@ -85,6 +87,7 @@ class Server:
         self.helpers = helpers
 
         self.eventloop: Optional[AbstractEventLoop] = None
+        self.listeners: set = set()
         self.remotes: set = set()
         self.server: Optional[AbstractServer] = None
         self.startup: dt = dt.utcnow()
@@ -95,6 +98,7 @@ class Server:
 
         self.hooks_notif = {}
         self.hooks_request = {}
+        self.hooks_connection = [self.encrypt_remote]
 
     def setup(self, *_a, **_kw):
         """Execute all prerequisites to running, before running. Meant to be
@@ -119,7 +123,7 @@ class Server:
                 try:
                     await func(data.get("params", None))
                 except Exception as e:
-                    err(f"Notification raised Exception", e)
+                    err(f"Notification raised Exception:", e)
 
             self.hooks_notif[method] = handler
             return func
@@ -133,15 +137,24 @@ class Server:
             return partial(self.hook_request, method)
         else:
             # Function provided. Hook it directly.
+            params = len(signature(func).parameters)
+
             @wraps(func)
             async def handler(data: dict, conn: Remote):
                 try:
-                    res = await func(data.get("params", None))
+                    if params == 1:
+                        res = await func(data.get("params", None))
+                    else:
+                        res = await func(data.get("params", None), conn)
                 except Exception as e:
                     await conn.respond(
                         data.get("id", "0"),
                         data.get("method", "NONE"),
-                        err={"code": type(e).__name__, "message": str(e), "data": e.args},
+                        err={
+                            "code": type(e).__name__,
+                            "message": str(e),
+                            "data": e.args,
+                        },
                     )
                 else:
                     await conn.respond(
@@ -150,6 +163,13 @@ class Server:
 
             self.hooks_request[method] = handler
             return func
+
+    def hook_connect(self, func):
+        """Add a Function to a List of Callables that will be called on every
+            new Connection.
+        """
+        self.hooks_connection.append(func)
+        return func
 
     async def broadcast(
         self,
@@ -190,9 +210,10 @@ class Server:
         return list(zip(reqs.keys(), wins))
 
     def drop(self, remote: Remote):
-        self.total_sent.update(remote.total_sent)
-        self.total_recv.update(remote.total_recv)
-        self.remotes.remove(remote)
+        if remote in self.remotes:
+            self.total_sent.update(remote.total_sent)
+            self.total_recv.update(remote.total_recv)
+            self.remotes.remove(remote)
 
     async def encrypt_remote(self, remote: Remote):
         echo("info", f"Starting Secure Connection with {remote}...")
@@ -208,9 +229,16 @@ class Server:
         for remote in self.remotes:
             await remote.terminate(reason)
         self.remotes: Set[Remote] = set()
+        # g = gather(*self.listeners, return_exceptions=True)
+        # g.cancel()
+        # await g
+        for task in self.listeners.copy():
+            task.cancel()
+
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
+        self.server = None
         echo("dcon", "Server closed.")
 
     async def open_connection(self, str_in: StreamReader, str_out: StreamWriter):
@@ -232,20 +260,40 @@ class Server:
         self.remotes.add(remote)
         echo("diff", f"Client at {remote.host} has been assigned UUID {remote.id}.")
 
-        # Encrypt the Remote Connection.
-        rsa = self.eventloop.create_task(self.encrypt_remote(remote))
+        listening = self.eventloop.create_task(remote.loop(self.helpers))
+        self.listeners.add(listening)
+
+        def cb(*_):
+            if listening in self.listeners:
+                self.listeners.remove(listening)
+
+        listening.add_done_callback(cb)
+
+        # # Encrypt the Remote Connection.
+        # rsa = self.eventloop.create_task(self.encrypt_remote(remote))
+
+        for hook in self.hooks_connection:
+            try:
+                await hook(remote)
+            except Exception as e:
+                err(f"Failed to run {hook.__name__!r} on {remote}:", e)
+
         try:
             # Run the Remote Loop Coroutine. While this runs, messages received
             #   from the Remote Client are added to the Queue of the Remote
             #   object. This Coroutine also dispatches other Tasks to handle the
             #   received messages.
-            await remote.loop(self.helpers)
+            await listening
+
+        except CancelledError:
+            pass
 
         finally:
             try:
                 # Try not to drop the remote before the RSA Handshake is done.
-                await wait_for(rsa, 3)
-            except TimeoutError:
+                # await wait_for(rsa, 3)
+                pass
+            except (RuntimeError, TimeoutError):
                 pass
             self.drop(remote)
 

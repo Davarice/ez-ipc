@@ -3,7 +3,7 @@
 from asyncio import gather
 
 from .callbacks import callback_response
-from .output import echo, err, newLogger, P, set_colors, set_verbosity, warn
+from .output import echo, err, newLogger, P, set_verbosity, T, warn
 
 
 async def cleanup(tasks):
