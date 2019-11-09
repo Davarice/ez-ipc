@@ -4,6 +4,7 @@ A (loose) implementation of the JSON-RPC 2.0 protocol.
 https://www.jsonrpc.org/specification
 """
 
+from enum import IntEnum
 import json
 from typing import Tuple, Union
 from uuid import uuid4
@@ -11,6 +12,22 @@ from uuid import uuid4
 
 JSON_OPTS = {"separators": (",", ":")}
 __version__ = "2.0"
+
+
+basic_ = frozenset({"jsonrpc"})
+
+id_ = basic_ | frozenset({"id"})
+method_ = basic_ | frozenset({"method"})
+params_ = basic_ | frozenset({"params"})
+
+err_sub = frozenset({"code", "message"})
+err_sup = err_sub | frozenset({"data"})
+
+notif_sup = method_ | params_
+req_sub = id_ | method_
+req_sup = req_sub | params_
+res_sub = frozenset({"error", "result"})
+res_sup = id_ | res_sub
 
 
 def _make(meth: str, *args, **kwargs) -> dict:
@@ -119,7 +136,7 @@ def make_response(mid: str, res: Union[dict, list] = None, err: dict = None) -> 
     """
     resp = {"jsonrpc": __version__}
     if err:
-        if not verify_error(list(err.keys())):
+        if not (err_sub <= set(err.keys()) <= err_sup):
             raise ValueError(
                 "Error must have keys 'code', 'message', and, optionally, 'data'."
             )
@@ -137,24 +154,27 @@ def unpack(data: str) -> dict:
     return json.loads(data)
 
 
-def verify_error(keys: list) -> bool:
-    return keys == ["code", "message", "data"] or keys == ["code", "message"]
+class JRPC(IntEnum):
+    NONE = 0
+    NOTIF = 1
+    REQUEST = 2
+    RESPONSE = 3
 
+    @classmethod
+    def check(cls, data: dict) -> "JRPC":
+        if data.get("jsonrpc") != __version__:
+            return cls.NONE
+        keys = frozenset(data.keys())
 
-def verify_notif(keys: list, data: dict) -> bool:
-    return data.get("jsonrpc", "") == __version__ and (
-        keys == ["jsonrpc", "method", "params"] or keys == ["jsonrpc", "method"]
-    )
+        if id_ < keys:
+            # Either a Request or a Response.
+            if req_sub <= keys <= req_sup:
+                return cls.REQUEST
+            elif res_sub & keys and keys <= res_sup:
+                return cls.RESPONSE
 
+        elif method_ <= keys <= notif_sup:
+            # A Notification.
+            return cls.NOTIF
 
-def verify_request(keys: list, data: dict) -> bool:
-    return data.get("jsonrpc", "") == __version__ and (
-        keys == ["jsonrpc", "method", "params", "id"]
-        or keys == ["jsonrpc", "method", "id"]
-    )
-
-
-def verify_response(keys: list, data: dict) -> bool:
-    return data.get("jsonrpc", "") == __version__ and (
-        keys == ["jsonrpc", "result", "id"] or keys == ["jsonrpc", "error", "id"]
-    )
+        return cls.NONE

@@ -29,13 +29,11 @@ from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
 from .protocol import (
     Errors,
+    JRPC,
     make_notif,
     make_request,
     make_response,
     unpack,
-    verify_notif,
-    verify_request,
-    verify_response,
 )
 
 
@@ -188,8 +186,11 @@ class Remote:
 
         # echo("info", repr(data))
 
-        keys = list(data.keys())
-        if verify_response(keys, data):
+        mtype = JRPC.check(data)
+
+        # keys = list(data.keys())
+        # if verify_response(keys, data):
+        if mtype is JRPC.RESPONSE:
             # Message is a RESPONSE.
             echo("recv", f"Receiving a Response from {self}...")
             self.total_recv["response"] += 1
@@ -221,7 +222,8 @@ class Remote:
                 # Nothing is waiting for this message. Make a note and move on.
                 warn(f"Received an unsolicited Response. UUID: {mid}")
 
-        elif verify_request(keys, data):
+        # elif verify_request(keys, data):
+        elif mtype is JRPC.REQUEST:
             # Message is a REQUEST.
             echo("recv", f"Receiving a {hl_method(data['method'])} Request from {self}...")
             self.total_recv["request"] += 1
@@ -241,7 +243,8 @@ class Remote:
                     data["id"], err=Errors.method_not_found(data.get("method"))
                 )
 
-        elif verify_notif(keys, data):
+        # elif verify_notif(keys, data):
+        elif mtype is JRPC.NOTIF:
             # Message is a NOTIFICATION.
             echo("recv", f"Receiving a {hl_method(data['method'])} Notification from {self}...")
             self.total_recv["notif"] += 1
@@ -264,7 +267,7 @@ class Remote:
             #   send a Response containing an Error and a frowny face.
             echo("", f"Received an invalid Message from {self}")
             if "id" in data:
-                await self.respond(data["id"], err=Errors.invalid_request(keys))
+                await self.respond(data["id"], err=Errors.invalid_request(list(data.keys())))
 
     def handle_request(self, method: str) -> Callable:
         return request_handler(self, method)
