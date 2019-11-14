@@ -19,11 +19,11 @@ from asyncio import (
 from collections import Counter
 from datetime import datetime as dt
 from functools import partial
-from json import JSONDecodeError
+from json import JSONDecodeError, loads
 from typing import Any, Callable, Dict, List, Union
 from uuid import uuid4
 
-from ..util.output import echo, err as err_, hl_method, hl_remote, T, warn
+from ..util.output import echo, err as err_, hl_method, hl_remote, warn
 from .connection import can_encrypt, Connection
 from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
@@ -33,7 +33,6 @@ from .protocol import (
     make_notif,
     make_request,
     make_response,
-    unpack,
 )
 
 
@@ -175,7 +174,7 @@ class Remote:
         the Method received, and run it.
         """
         try:
-            data = unpack(line)
+            data = loads(line)
         except JSONDecodeError as e:
             warn(f"Invalid JSON received from {self}.")
             await self.respond("0", err=Errors.parse_error(str(e)))
@@ -186,6 +185,8 @@ class Remote:
 
         # echo("info", repr(data))
 
+        method = data.get("method")
+        mid = data.get("id")
         mtype = JRPC.check(data)
 
         # keys = list(data.keys())
@@ -194,7 +195,6 @@ class Remote:
             # Message is a RESPONSE.
             echo("recv", f"Receiving a Response from {self}...")
             self.total_recv["response"] += 1
-            mid = data["id"]
             if mid in self.futures:
                 # Something is waiting for this message.
                 future: Future = self.futures[mid]
@@ -208,13 +208,15 @@ class Remote:
                     # We need to fulfill this Future now.
                     if "error" in data:
                         # Server sent an Error Response. Forward it to the Future.
-                        e = RemoteError(
-                            data["error"]["code"],
-                            data["error"]["message"],
-                            data["error"]["data"] if "data" in data["error"] else None,
-                            mid,
+                        future.set_exception(RemoteError.from_message(data))
+                        future.set_exception(
+                            RemoteError(
+                                (errdat := data["error"])["code"],
+                                errdat["message"],
+                                errdat["data"] if "data" in errdat else None,
+                                mid,
+                            )
                         )
-                        future.set_exception(e)
                     else:
                         # Server sent a Result Response. Give it to the Future.
                         future.set_result(data["result"])
@@ -225,49 +227,46 @@ class Remote:
         # elif verify_request(keys, data):
         elif mtype is JRPC.REQUEST:
             # Message is a REQUEST.
-            echo("recv", f"Receiving a {hl_method(data['method'])} Request from {self}...")
+            echo("recv", f"Receiving a {hl_method(method)} Request from {self}...")
             self.total_recv["request"] += 1
 
             hooks = self.hooks_request.copy()
             hooks.update(self.hooks_request_inher)
 
-            if data["method"] in hooks:
+            if method in hooks:
                 # We know where to send this type of Request.
-                func = hooks[data["method"]]
+                func = hooks[method]
                 # await func(data, self)
-                tsk = self.eventloop.create_task(func(data, self))
-                tasks.append(tsk)
+                tasks.append(self.eventloop.create_task(func(data, self)))
             else:
                 # We have no hook for this method; Return an Error.
-                await self.respond(
-                    data["id"], err=Errors.method_not_found(data.get("method"))
-                )
+                await self.respond(mid, err=Errors.method_not_found(method))
 
         # elif verify_notif(keys, data):
         elif mtype is JRPC.NOTIF:
             # Message is a NOTIFICATION.
-            echo("recv", f"Receiving a {hl_method(data['method'])} Notification from {self}...")
+            echo("recv", f"Receiving a {hl_method(method)} Notification from {self}...")
             self.total_recv["notif"] += 1
 
             hooks = self.hooks_notif.copy()
             hooks.update(self.hooks_notif_inher)
 
-            if data["method"] == "TERM":
+            if method == "TERM":
                 # The connection is being explicitly terminated.
                 raise ConnectionResetError(
                     data["params"]["reason"] or "Connection terminated by peer."
                 )
-            elif data["method"] in hooks:
+            elif method in hooks:
                 # We know where to send this type of Notification.
-                func = hooks[data["method"]]
+                func = hooks[method]
                 tasks.append(self.eventloop.create_task(func(data, self)))
 
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.
             echo("", f"Received an invalid Message from {self}")
-            if "id" in data:
-                await self.respond(data["id"], err=Errors.invalid_request(list(data.keys())))
+            if mid:
+                await self.respond(mid, err=Errors.invalid_request(list(data.keys())))
 
     def handle_request(self, method: str) -> Callable:
         return request_handler(self, method)

@@ -150,10 +150,6 @@ def make_response(mid: str, res: Union[dict, list] = None, err: dict = None) -> 
     return json.dumps(resp, **JSON_OPTS)
 
 
-def unpack(data: str) -> dict:
-    return json.loads(data)
-
-
 class JRPC(IntEnum):
     NONE = 0
     NOTIF = 1
