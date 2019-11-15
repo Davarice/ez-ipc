@@ -173,11 +173,10 @@ class Client:
         self.remote.hooks_request_inher = self.hooks_request
         echo(
             "con",
-            "Connected to Host. Server has been given the alias '{}'.".format(
-                self.remote.id
-            ),
+            f"Connected to Host. Server has been given the alias '{self.remote.id}'.",
         )
         self.listening = loop.create_task(self.remote.loop(helpers))
+        self.listening.add_done_callback(self.report)
         await self.setup()
         return True
 
@@ -211,6 +210,18 @@ class Client:
             echo("dcon", "Connection terminated.")
         except:
             err("Skipping niceties.")
+
+    def report(self, *_):
+        echo("info", "Sent:")
+        echo(
+            "tab",
+            [f"> {v} {k.capitalize()}s" for k, v in self.remote.total_sent.items()],
+        )
+        echo("info", "Received:")
+        echo(
+            "tab",
+            [f"> {v} {k.capitalize()}s" for k, v in self.remote.total_recv.items()],
+        )
 
     async def run_through(self, *coros: Callable, loop: AbstractEventLoop = None):
         """Construct a Coroutine that will sequentially run an arbitrary number
@@ -253,20 +264,5 @@ class Client:
 
         finally:
             if self.remote:
-                echo("info", "Sent:")
-                echo(
-                    "tab",
-                    [
-                        "> {} {}s".format(v, k.capitalize())
-                        for k, v in self.remote.total_sent.items()
-                    ],
-                )
-                echo("info", "Received:")
-                echo(
-                    "tab",
-                    [
-                        "> {} {}s".format(v, k.capitalize())
-                        for k, v in self.remote.total_recv.items()
-                    ],
-                )
+                self.report()
                 await self.disconnect()

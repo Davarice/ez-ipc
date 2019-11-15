@@ -204,22 +204,17 @@ class Remote:
             warn(f"Corrupt data received from {self}.")
             return
 
-        # echo("info", repr(data))
-
         method = data.get("method")
         mid = data.get("id")
         mtype = JRPC.check(data)
 
-        # keys = list(data.keys())
-        # if verify_response(keys, data):
         if mtype is JRPC.RESPONSE:
             # Message is a RESPONSE.
             echo("recv", f"Receiving a Response from {self}...")
             self.total_recv["response"] += 1
             if mid in self.futures:
                 # Something is waiting for this message.
-                future: Future = self.futures[mid]
-                del self.futures[mid]
+                future: Future = self.futures.pop(mid)
 
                 if future.cancelled():
                     warn(f"Received a Response for a cancelled Future. UUID: {mid}")
@@ -230,14 +225,6 @@ class Remote:
                     if "error" in data:
                         # Server sent an Error Response. Forward it to the Future.
                         future.set_exception(RemoteError.from_message(data))
-                        # future.set_exception(
-                        #     RemoteError(
-                        #         (errdat := data["error"])["code"],
-                        #         errdat["message"],
-                        #         errdat["data"] if "data" in errdat else None,
-                        #         mid,
-                        #     )
-                        # )
                     else:
                         # Server sent a Result Response. Give it to the Future.
                         future.set_result(data["result"])
@@ -245,7 +232,6 @@ class Remote:
                 # Nothing is waiting for this message. Make a note and move on.
                 warn(f"Received an unsolicited Response. UUID: {mid}")
 
-        # elif verify_request(keys, data):
         elif mtype is JRPC.REQUEST:
             # Message is a REQUEST.
             echo("recv", f"Receiving a {hl_method(method)} Request from {self}...")
@@ -256,14 +242,11 @@ class Remote:
 
             if method in hooks:
                 # We know where to send this type of Request.
-                func = hooks[method]
-                # await func(data, self)
-                tasks.append(self.eventloop.create_task(func(data, self)))
+                tasks.append(self.eventloop.create_task(hooks[method](data, self)))
             else:
                 # We have no hook for this method; Return an Error.
                 await self.respond(mid, err=Errors.method_not_found(method))
 
-        # elif verify_notif(keys, data):
         elif mtype is JRPC.NOTIF:
             # Message is a NOTIFICATION.
             echo("recv", f"Receiving a {hl_method(method)} Notification from {self}...")
@@ -279,8 +262,7 @@ class Remote:
                 )
             elif method in hooks:
                 # We know where to send this type of Notification.
-                func = hooks[method]
-                tasks.append(self.eventloop.create_task(func(data, self)))
+                tasks.append(self.eventloop.create_task(hooks[method](data, self)))
 
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
@@ -528,27 +510,27 @@ class Remote:
             it, and return None if the request timed out or (unless specified)
             yielded an Error Response.
         """
-        if not self.open:
-            return
+        if self.open:
+            future = await self.request(
+                meth, params, callback=callback, nohandle=nohandle
+            )
+            try:
+                if timeout > 0:
+                    await wait_for(future, timeout)
+                else:
+                    await future
 
-        future = await self.request(meth, params, callback=callback, nohandle=nohandle)
-        try:
-            if timeout > 0:
-                await wait_for(future, timeout)
-            else:
-                await future
-
-        except RemoteError as e:
-            if raise_remote_err:
-                raise e
-            else:
+            except RemoteError as e:
+                if raise_remote_err:
+                    raise e
+                else:
+                    return default
+            except (CancelledError, TimeoutError):
+                warn(f"{meth} Request timed out.")
                 return default
-        except (CancelledError, TimeoutError):
-            warn(f"{meth} Request timed out.")
-            return default
 
-        else:
-            return future.result()
+            else:
+                return future.result()
 
     async def respond(
         self,
@@ -559,40 +541,35 @@ class Remote:
         res: Union[dict, list] = None,
         nohandle: bool = False,
     ) -> None:
-        if not self.open:
-            return
-
-        echo(
-            "send",
-            "Sending {}{} to {}.".format(
-                "an Error Response" if err else "a Result Response",
-                f" for {hl_method(method)}" if method else "",
-                self,
-            ),
-        )
-        self.total_sent["response"] += 1
-        try:
-            await self.send(
-                make_response(mid, err=err) if err else make_response(mid, res=res)
+        if self.open:
+            echo(
+                "send",
+                "Sending {}{} to {}.".format(
+                    "an Error Response" if err else "a Result Response",
+                    f" for {hl_method(method)}" if method else "",
+                    self,
+                ),
             )
-        except Exception as e:
-            err_("Failed to send Response:", e)
-            if nohandle:
-                raise e
+            self.total_sent["response"] += 1
+            try:
+                await self.send(
+                    make_response(mid, err=err) if err else make_response(mid, res=res)
+                )
+            except Exception as e:
+                # noinspection PyCallingNonCallable
+                err_("Failed to send Response:", e)
+                if nohandle:
+                    raise e
 
     async def send(self, data: str) -> None:
-        if not self.open:
-            return
-
-        await self.connection.write(data)
+        if self.open:
+            await self.connection.write(data)
 
     async def terminate(self, reason: str = None) -> None:
-        if not self.open:
-            return
-
-        try:
-            await self.notif("TERM", {"reason": reason}, nohandle=True)
-        except Exception as e:
-            err_("Failed to send TERM:", e)
-        finally:
-            self.close()
+        if self.open:
+            try:
+                await self.notif("TERM", {"reason": reason}, nohandle=True)
+            except Exception as e:
+                err_("Failed to send TERM:", e)
+            finally:
+                self.close()

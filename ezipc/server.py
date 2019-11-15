@@ -12,7 +12,7 @@ from asyncio import (
     TimeoutError,
     wait_for,
 )
-from collections import Counter, Set
+from collections import Counter, MutableSet
 from datetime import datetime as dt
 from functools import partial, wraps
 from inspect import signature
@@ -101,11 +101,11 @@ class Server:
 
         self.addr: str = addr
         self.port: int = port
-        self.helpers = helpers
+        self.helpers: int = helpers
 
         self.eventloop: Optional[AbstractEventLoop] = None
-        self.listeners: set = set()
-        self.remotes: set = set()
+        self.listeners: MutableSet[Task] = set()
+        self.remotes: MutableSet[Remote] = set()
         self.server: Optional[AbstractServer] = None
         self.startup: dt = dt.utcnow()
 
@@ -245,13 +245,14 @@ class Server:
     async def terminate(self, reason: str = "Server Closing"):
         for remote in self.remotes:
             await remote.terminate(reason)
-        self.remotes: Set[Remote] = set()
+        self.remotes.clear()
         # g = gather(*self.listeners, return_exceptions=True)
         # g.cancel()
         # await g
-        for task in self.listeners.copy():
+        for task in self.listeners:
             task.cancel()
 
+        # self.report()
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
@@ -326,7 +327,27 @@ class Server:
             self.open_connection, self.addr, self.port, loop=self.eventloop
         )
         echo("win", "Ready to begin accepting Requests.")
-        await self.server.serve_forever()
+        # noinspection PyUnresolvedReferences
+        tsk = self.eventloop.create_task(self.server.serve_forever())
+        tsk.add_done_callback(self.report)
+        return tsk
+
+    def report(self, *_):
+        echo(
+            "info",
+            f"Served {self.total_clients} Clients in"
+            f" {str(dt.utcnow() - self.startup)[:-7]}.",
+        )
+        echo("info", "Sent:")
+        echo(
+            "tab",
+            [f"> {v} {k.capitalize()}s" for k, v in self.total_sent.items()],
+        )
+        echo("info", "Received:")
+        echo(
+            "tab",
+            [f"> {v} {k.capitalize()}s" for k, v in self.total_recv.items()],
+        )
 
     def start(self, *a, **kw):
         """Run alone and do nothing else. For very simple implementations that
@@ -345,22 +366,8 @@ class Server:
         else:
             echo("dcon", "Server closing...")
             run(self.terminate())
-        finally:
-            try:
-                echo(
-                    "info",
-                    f"Served {self.total_clients} Clients in"
-                    f" {str(dt.utcnow() - self.startup)[:-7]}.",
-                )
-                echo("info", "Sent:")
-                echo(
-                    "tab",
-                    [f"> {v} {k.capitalize()}s" for k, v in self.total_sent.items()],
-                )
-                echo("info", "Received:")
-                echo(
-                    "tab",
-                    [f"> {v} {k.capitalize()}s" for k, v in self.total_recv.items()],
-                )
-            except Exception:
-                return
+        # finally:
+        #     try:
+        #         self.report()
+        #     except Exception:
+        #         return

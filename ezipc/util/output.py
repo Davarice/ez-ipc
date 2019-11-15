@@ -43,7 +43,7 @@ colors: Dict[str, Tuple[Callable[[str], str], str, int]] = {
     "err": (T.magenta, "x!x", 1),
     "recv": (T.white, "-->", 3),
     "send": (T.bright_black, "<--", 3),
-    "tab": (T.white, "   ", 3),
+    "tab": (T.white, "   ", 2),
     "warn": (T.magenta, "(!)", 3),
     "info": (T.cyan, "(!)", 2),
 }
