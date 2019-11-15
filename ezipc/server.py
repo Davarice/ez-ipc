@@ -208,6 +208,18 @@ class Server:
         }
         return reqs
 
+    async def bcast_notif(
+        self, meth: str, params: Union[dict, list] = None, **kw,
+    ) -> Dict[Remote, Task]:
+        if not self.remotes:
+            return {}
+
+        reqs = {
+            r: self.eventloop.create_task(r.notif(meth, params, **kw))
+            for r in self.remotes
+        }
+        return reqs
+
     async def broadcast_wait(
         self,
         meth: str,
