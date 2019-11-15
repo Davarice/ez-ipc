@@ -5,6 +5,7 @@ try:
     from nacl.exceptions import CryptoError
     from nacl.public import Box, PrivateKey, PublicKey
 except ImportError as ex:
+
     class CryptoError(Exception):
         pass
 
@@ -18,10 +19,23 @@ else:
     can_encrypt: bool = True
 
 
-sep = b"\n"*5
+sep = b"\n" * 5
 
 
 class Connection:
+    __slots__ = (
+        "instr",
+        "outstr",
+        "can_encrypt",
+        "open",
+        "_key",
+        "key_other",
+        "_box",
+        "box",
+        "total_sent",
+        "total_recv",
+    )
+
     def __init__(self, instr: StreamReader, outstr: StreamWriter):
         self.instr: StreamReader = instr
         self.outstr: StreamWriter = outstr
@@ -78,7 +92,7 @@ class Connection:
     async def read(self) -> str:
         ctext: bytes = await self.instr.readuntil(sep)
         self.total_recv += len(ctext)
-        ptext: str = self._decrypt(ctext[:-len(sep)]).decode()
+        ptext: str = self._decrypt(ctext[: -len(sep)]).decode()
         return ptext
 
     async def write(self, ptext: str) -> int:

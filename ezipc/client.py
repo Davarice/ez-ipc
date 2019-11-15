@@ -15,7 +15,7 @@ from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_hand
 from .util import callback_response, echo, err, P, warn
 
 
-__all__ = [
+__all__ = (
     "callback_response",
     "can_encrypt",
     "Client",
@@ -27,7 +27,7 @@ __all__ = [
     "RemoteError",
     "request_handler",
     "warn",
-]
+)
 
 
 class Client:
@@ -44,6 +44,17 @@ class Client:
         this is not supplied, ``127.0.0.1`` will be used.
     :param int port: IP Port of the Server to use.
     """
+
+    __slots__ = (
+        "addr",
+        "port",
+        "eventloop",
+        "remote",
+        "listening",
+        "startup",
+        "hooks_notif",
+        "hooks_request",
+    )
 
     def __init__(self, addr: str = "127.0.0.1", port: int = 9002):
         self.addr: str = addr
@@ -111,7 +122,11 @@ class Client:
                     await conn.respond(
                         data.get("id", "0"),
                         data.get("method", "NONE"),
-                        err={"code": type(e).__name__, "message": str(e), "data": e.args},
+                        err={
+                            "code": type(e).__name__,
+                            "message": str(e),
+                            "data": e.args,
+                        },
                     )
                 else:
                     await conn.respond(

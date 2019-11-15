@@ -23,7 +23,7 @@ from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_hand
 from .util import callback_response, echo, err, P, warn
 
 
-__all__ = [
+__all__ = (
     "callback_response",
     "can_encrypt",
     "echo",
@@ -35,7 +35,7 @@ __all__ = [
     "request_handler",
     "Server",
     "warn",
-]
+)
 
 
 class Server:
@@ -58,6 +58,23 @@ class Server:
         very await-heavy procedures, such as multiple file transfers, but when
         not in use they mostly sap memory.
     """
+
+    __slots__ = (
+        "addr",
+        "port",
+        "eventloop",
+        "helpers",
+        "listeners",
+        "remotes",
+        "server",
+        "startup",
+        "total_clients",
+        "total_sent",
+        "total_recv",
+        "hooks_notif",
+        "hooks_request",
+        "hooks_connection",
+    )
 
     def __init__(
         self,

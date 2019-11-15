@@ -45,6 +45,27 @@ class Remote:
     of data to a Remote Host.
     """
 
+    __slots__ = (
+        "eventloop",
+        "instr",
+        "outstr",
+        "connection",
+        "addr",
+        "port",
+        "hooks_notif",
+        "hooks_notif_inher",
+        "hooks_request",
+        "hooks_request_inher",
+        "futures",
+        "lines",
+        "total_sent",
+        "total_recv",
+        "group",
+        "id",
+        "opened",
+        "startup",
+    )
+
     def __init__(
         self,
         eventloop: AbstractEventLoop,
@@ -209,14 +230,14 @@ class Remote:
                     if "error" in data:
                         # Server sent an Error Response. Forward it to the Future.
                         future.set_exception(RemoteError.from_message(data))
-                        future.set_exception(
-                            RemoteError(
-                                (errdat := data["error"])["code"],
-                                errdat["message"],
-                                errdat["data"] if "data" in errdat else None,
-                                mid,
-                            )
-                        )
+                        # future.set_exception(
+                        #     RemoteError(
+                        #         (errdat := data["error"])["code"],
+                        #         errdat["message"],
+                        #         errdat["data"] if "data" in errdat else None,
+                        #         mid,
+                        #     )
+                        # )
                     else:
                         # Server sent a Result Response. Give it to the Future.
                         future.set_result(data["result"])
