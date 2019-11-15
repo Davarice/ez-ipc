@@ -333,21 +333,30 @@ class Server:
         return tsk
 
     def report(self, *_):
-        echo(
-            "info",
-            f"Served {self.total_clients} Clients in"
-            f" {str(dt.utcnow() - self.startup)[:-7]}.",
-        )
-        echo("info", "Sent:")
-        echo(
-            "tab",
-            [f"> {v} {k.capitalize()}s" for k, v in self.total_sent.items()],
-        )
-        echo("info", "Received:")
-        echo(
-            "tab",
-            [f"> {v} {k.capitalize()}s" for k, v in self.total_recv.items()],
-        )
+        try:
+            echo(
+                "info",
+                f"Served {self.total_clients} Clients in"
+                f" {str(dt.utcnow() - self.startup)[:-7]}.",
+            )
+            echo("info", "Sent:")
+            echo(
+                "tab",
+                [
+                    f"> {v} {k.capitalize()}{'' if v == 1 else 's'}"
+                    for k, v in self.total_sent.items()
+                ],
+            )
+            echo("info", "Received:")
+            echo(
+                "tab",
+                [
+                    f"> {v} {k.capitalize()}{'' if v == 1 else 's'}"
+                    for k, v in self.total_recv.items()
+                ],
+            )
+        except:
+            pass
 
     def start(self, *a, **kw):
         """Run alone and do nothing else. For very simple implementations that

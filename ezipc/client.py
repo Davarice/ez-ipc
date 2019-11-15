@@ -212,16 +212,25 @@ class Client:
             err("Skipping niceties.")
 
     def report(self, *_):
-        echo("info", "Sent:")
-        echo(
-            "tab",
-            [f"> {v} {k.capitalize()}s" for k, v in self.remote.total_sent.items()],
-        )
-        echo("info", "Received:")
-        echo(
-            "tab",
-            [f"> {v} {k.capitalize()}s" for k, v in self.remote.total_recv.items()],
-        )
+        try:
+            echo("info", "Sent:")
+            echo(
+                "tab",
+                [
+                    f"> {v} {k.capitalize()}{'' if v == 1 else 's'}"
+                    for k, v in self.remote.total_sent.items()
+                ],
+            )
+            echo("info", "Received:")
+            echo(
+                "tab",
+                [
+                    f"> {v} {k.capitalize()}{'' if v == 1 else 's'}"
+                    for k, v in self.remote.total_recv.items()
+                ],
+            )
+        except:
+            pass
 
     async def run_through(self, *coros: Callable, loop: AbstractEventLoop = None):
         """Construct a Coroutine that will sequentially run an arbitrary number
