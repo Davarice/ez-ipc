@@ -332,8 +332,7 @@ class Remote:
                 Then, when the Processing Coroutine finishes, Gather and Await
                 all the Tasks, if any, that have since accrued.
             """
-            while True:
-                line: str = await self.lines.get()
+            while line := await self.lines.get():
                 tasks: List[Task] = []
 
                 try:
@@ -348,31 +347,35 @@ class Remote:
                 finally:
                     self.lines.task_done()
 
+        new = lambda: self.eventloop.create_task(_helper())
+
+        def revive():
+            for i, h in enumerate(helpers):
+                if h.done():
+                    # Replace all Helpers that have stopped.
+                    e = h.exception()
+                    if e is None:
+                        err_("A Helper Task has died.")
+                    else:
+                        err_("A Helper Task has died to an Exception:", e)
+                    helpers[i] = new()
+
         try:
             # Create Tasks.
-            new = lambda: self.eventloop.create_task(_helper())
             for _ in range(count):
                 helpers.append(new())
-
-            def check():
-                for i, h in enumerate(helpers):
-                    if h.done():
-                        # Replace all Helpers that have stopped.
-                        e = h.exception()
-                        if e is None:
-                            err_("A Helper Task has died.")
-                        else:
-                            err_("A Helper Task has died to an Exception:", e)
-                        helpers[i] = new()
 
             # Loop "forever", waiting for one to Raise. Note that we do NOT pass
             #   ``return_exceptions`` to these ``gather()``s.
             while True:
                 try:
                     await gather(*helpers)
+                except CancelledError:
+                    # If this is Cancelled, break the loop and stop all Helpers.
+                    break
                 except:
-                    check()
-
+                    # On any other Exception, ignore it and revive dead Helpers.
+                    revive()
         finally:
             # Kill Tasks.
             g = gather(*helpers)
