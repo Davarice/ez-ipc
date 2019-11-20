@@ -123,8 +123,8 @@ class Server:
         """
 
         @self.hook_request("TIME")
-        async def cb_time(*_):
-            return {"startup": self.startup.timestamp()}
+        async def cb_time(_, remote: Remote):
+            return {"startup": self.startup.timestamp(), "id": remote.id}
 
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
@@ -250,9 +250,9 @@ class Server:
             if await wait_for(remote.enable_rsa(), 10):
                 echo("win", f"Secure Connection established with {remote}.")
             else:
-                warn(f"Failed to establish Secure Connection with {remote}.")
+                warn(f"Failed to establish Secure Connection with {remote!r}.")
         except TimeoutError:
-            warn(f"Encryption Request to {remote} timed out.")
+            warn(f"Encryption Request to {remote!r} timed out.")
 
     async def terminate(self, reason: str = "Server Closing"):
         for remote in self.remotes:
@@ -278,7 +278,7 @@ class Server:
             f"Incoming Connection from Client at "
             f"`{str_out.get_extra_info('peername', ('Unknown Address', 0))[0]}`.",
         )
-        remote = Remote(self.eventloop, str_in, str_out)
+        remote = Remote(self.eventloop, str_in, str_out, rtype="Client")
         self.total_clients += 1
 
         # Update the Client Hooks with our own.
@@ -306,7 +306,7 @@ class Server:
             try:
                 await hook(remote)
             except Exception as e:
-                err(f"Failed to run {hook.__name__!r} on {remote}:", e)
+                err(f"Failed to run {hook.__name__!r} on {remote!r}:", e)
 
         try:
             # Run the Remote Loop Coroutine. While this runs, messages received

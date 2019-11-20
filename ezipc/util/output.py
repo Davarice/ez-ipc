@@ -9,6 +9,7 @@ NOCOLOR = lambda s: s
 
 
 try:
+    # noinspection PyPackageRequirements
     from blessings import Terminal
 except ImportError:
 
@@ -36,21 +37,22 @@ def newLogger(name: str = ""):
 
 colors: Dict[str, Tuple[Callable[[str], str], str, int]] = {
     "": (T.white, "", 1),
-    "con": (T.white, " ++", 1),
-    "dcon": (T.bright_black, "X- ", 1),
-    "win": (T.bright_green, "\o/", 1),
+    "con": (T.bold_white, " ++", 1),
+    "dcon": (T.bold_black, "X- ", 1),
+    "win": (T.bold_green, "\o/", 1),
     "diff": (T.white, "*- ", 2),
     "err": (T.magenta, "x!x", 1),
     "recv": (T.white, "-->", 3),
-    "send": (T.bright_black, "<--", 3),
+    "send": (T.bold_black, "<--", 3),
     "tab": (T.white, "   ", 2),
-    "warn": (T.magenta, "(!)", 3),
+    "warn": (T.magenta, "<!>", 3),
     "info": (T.cyan, "(!)", 2),
 }
 
 
 hl_method = T.bold_yellow
 hl_remote = T.bold_magenta
+hl_rtype = T.underline
 
 
 class _Printer:
@@ -70,11 +72,12 @@ class _Printer:
             print(
                 "<{}> {} {}".format(now.isoformat(sep=" ")[:-3], prefix, text),
                 file=self.file,
-                flush=True,
+                # flush=True,
             )
         if pri <= self.verbosity:
             self.output_line(
-                f"<{str(now)[11:-4]}> {p_color(prefix)} {(color or tc or NOCOLOR)(text)}"
+                # f"<{str(now)[11:-4]}> {p_color(prefix)} {(color or tc or NOCOLOR)(text)}"
+                f"<{now:%T}> {p_color(prefix)} {(color or tc or NOCOLOR)(text)}"
             )
 
 
@@ -85,7 +88,7 @@ def echo(etype: str, text: Union[str, List[str]] = None, color=""):
     if text is None:
         etype, text = "info", etype
 
-    if type(text) == list:
+    if isinstance(text, list):
         for line in text:
             P.emit(etype, line, color)
     else:
@@ -98,7 +101,9 @@ def err(text: str, exc: BaseException = None):
     echo("err", text, T.red)
 
 
-def warn(text: str):
+def warn(text: str, exc: BaseException = None):
+    if exc is not None:
+        text += f" {type(exc).__name__} - {exc}"
     echo("warn", text, T.bright_yellow)
 
 

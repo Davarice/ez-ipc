@@ -23,7 +23,7 @@ from json import JSONDecodeError, loads
 from typing import Any, Callable, Dict, List, Union
 from uuid import uuid4
 
-from ..util.output import echo, err as err_, hl_method, hl_remote, warn
+from ..util.output import echo, err as err_, hl_method, hl_remote, hl_rtype, warn
 from .connection import can_encrypt, Connection
 from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
@@ -34,6 +34,13 @@ from .protocol import (
     make_request,
     make_response,
 )
+
+
+def mkid(remote: "Remote") -> str:
+    return format(
+        (uuid4().int + remote.port + sum(map(int, remote.addr.split(".")))) % 0x1000,
+        "0>3X",
+    )
 
 
 class Remote:
@@ -61,6 +68,7 @@ class Remote:
         "total_sent",
         "total_recv",
         "group",
+        "rtype",
         "id",
         "opened",
         "startup",
@@ -72,6 +80,9 @@ class Remote:
         instr: StreamReader,
         outstr: StreamWriter,
         group: set = None,
+        *,
+        rtype: str = "Remote",
+        remote_id: str = None,
     ):
         self.eventloop: AbstractEventLoop = eventloop
         self.instr: StreamReader = instr
@@ -92,10 +103,8 @@ class Remote:
         self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
 
         self.group: set = group
-        self.id: str = hex(
-            (uuid4().int + self.port + sum([int(s) for s in self.addr.split(".")]))
-            % 16 ** 3
-        )[2:]
+        self.rtype: str = rtype
+        self.id: str = remote_id or mkid(self)
 
         now = dt.utcnow()
         self.opened: dt = now
@@ -115,11 +124,10 @@ class Remote:
         return self.connection.open
 
     def __str__(self) -> str:
-        return f"Remote {hl_remote(self.id)}"
+        return hl_rtype(f"{self.rtype} {hl_remote(self.id)}")
 
-    @property
-    def name(self) -> str:
-        return f"Remote {self.id}"
+    def __repr__(self) -> str:
+        return f"{self.rtype} {self.id}"
 
     def _add_hooks(self) -> None:
         """Add the initial hooks for the connection: Ping, and the two hooks
@@ -197,11 +205,11 @@ class Remote:
         try:
             data = loads(line)
         except JSONDecodeError as e:
-            warn(f"Invalid JSON received from {self}.")
+            warn(f"Invalid JSON received from {self!r}.")
             await self.respond("0", err=Errors.parse_error(str(e)))
             return
         except UnicodeDecodeError:
-            warn(f"Corrupt data received from {self}.")
+            warn(f"Corrupt data received from {self!r}.")
             return
 
         method = data.get("method")
@@ -217,9 +225,13 @@ class Remote:
                 future: Future = self.futures.pop(mid)
 
                 if future.cancelled():
-                    warn(f"Received a Response for a cancelled Future. UUID: {mid}")
+                    warn(
+                        f"Received a Response for {self!r} for a cancelled Future. UUID: {mid}"
+                    )
                 elif future.done():
-                    warn(f"Received a Response for a closed Future. UUID: {mid}")
+                    warn(
+                        f"Received a Response for {self!r} for a closed Future. UUID: {mid}"
+                    )
                 else:
                     # We need to fulfill this Future now.
                     if "error" in data:
@@ -230,7 +242,7 @@ class Remote:
                         future.set_result(data["result"])
             else:
                 # Nothing is waiting for this message. Make a note and move on.
-                warn(f"Received an unsolicited Response. UUID: {mid}")
+                warn(f"Received an unsolicited Response for {self!r}. UUID: {mid}")
 
         elif mtype is JRPC.REQUEST:
             # Message is a REQUEST.
@@ -355,9 +367,9 @@ class Remote:
                     # Replace all Helpers that have stopped.
                     e = h.exception()
                     if e is None:
-                        err_("A Helper Task has died.")
+                        err_(f"A Helper Task in {self!r} has died.")
                     else:
-                        err_("A Helper Task has died to an Exception:", e)
+                        err_(f"A Helper Task in {self!r} has died to an Exception:", e)
                     helpers[i] = new()
 
         try:
@@ -387,7 +399,7 @@ class Remote:
         handled by Helper Tasks.
         """
         # Create a Task that creates Tasks.
-        helpline = self.eventloop.create_task(self.run_helpers(helper_count))
+        helper_runner = self.eventloop.create_task(self.run_helpers(helper_count))
 
         try:
             async for item in self.connection:
@@ -395,17 +407,16 @@ class Remote:
                 if isinstance(item, Exception):
                     # If we received an Exception, the Decryption failed.
                     warn(
-                        f"Decryption from {self.name} failed:"
-                        f" {type(item).__name__} - {item}"
+                        f"Decryption from {self!r} failed:", item,
                     )
                 else:
                     # Otherwise, add it to the Queue.
                     await self.lines.put(item)
 
                 # Double check that we are still listening.
-                if helpline.done():
+                if helper_runner.done():
                     # Helper Helper has ended, for some reason.
-                    e = helpline.exception()
+                    e = helper_runner.exception()
                     if e:
                         raise e
                     else:
@@ -413,24 +424,25 @@ class Remote:
 
         except IncompleteReadError:
             if self.open:
-                err_(f"Connection with {self.name} cut off.")
+                err_(f"Connection with {self!r} cut off.")
         except EOFError:
             if self.open:
-                err_(f"Connection with {self.name} failed: Stream ended.")
+                err_(f"Connection with {self!r} failed: Stream ended.")
         except ConnectionError as e:
             if self.open:
                 echo("dcon", f"Connection with {self} closed: {e}")
         except CancelledError:
             if self.open:
-                err_(f"Listening to {self.name} was cancelled.")
+                err_(f"Listening to {self!r} was cancelled.")
         except Exception as e:
             if self.open:
-                err_(f"Connection with {self.name} failed:", e)
+                err_(f"Connection with {self!r} failed:", e)
 
         finally:
-            helpline.cancel()
             self.close()
-            await helpline
+            if not helper_runner.done():
+                helper_runner.cancel()
+                await helper_runner
 
     async def notif(
         self, meth: str, params: Union[dict, list] = None, nohandle: bool = False
@@ -442,9 +454,9 @@ class Remote:
         try:
             echo("send", f"Sending a {hl_method(meth)} Notification to {self}.")
             self.total_sent["notif"] += 1
-            if type(params) == dict:
+            if isinstance(params, dict):
                 await self.send(make_notif(meth, **params))
-            elif type(params) == list:
+            elif isinstance(params, list):
                 await self.send(make_notif(meth, *params))
             else:
                 await self.send(make_notif(meth))
@@ -474,9 +486,9 @@ class Remote:
         echo("send", f"Sending {hl_method(meth)} Request to {self}.")
         self.total_sent["request"] += 1
 
-        if type(params) == dict:
+        if isinstance(params, dict):
             data, mid = make_request(meth, **params)
-        elif type(params) == list:
+        elif isinstance(params, list):
             data, mid = make_request(meth, *params)
         else:
             data, mid = make_request(meth)

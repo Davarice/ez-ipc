@@ -11,7 +11,14 @@ from datetime import datetime as dt
 from functools import partial, wraps
 from typing import Callable, Optional, Union
 
-from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
+from .remote import (
+    can_encrypt,
+    mkid,
+    Remote,
+    RemoteError,
+    request_handler,
+    rpc_response,
+)
 from .util import callback_response, echo, err, P, warn
 
 
@@ -78,11 +85,12 @@ class Client:
         response = await self.remote.request_wait("TIME")
 
         if response:
+            self.remote.id = response.get("id") or mkid(self.remote)
             ts = response.get("startup", 0)
             if ts:
                 self.startup = dt.fromtimestamp(ts)
                 P.startup = self.startup
-                echo("info", "Server Uptime: {}".format(dt.utcnow() - self.startup))
+                echo("info", f"Server Uptime: {dt.utcnow() - self.startup}")
         else:
             warn("Failed to get Server Uptime.")
 
@@ -159,7 +167,7 @@ class Client:
                 open_connection(self.addr, self.port, loop=loop), timeout
             )
         except TimeoutError:
-            err("Connection timed out after {}s.".format(timeout))
+            err(f"Connection timed out after {timeout}s.")
             return False
         except ConnectionRefusedError:
             err("Connection Refused.")
@@ -168,17 +176,31 @@ class Client:
             err("Connection Lost:", e)
             return False
 
-        self.remote = Remote(loop, *streams)
-        self.remote.hooks_notif_inher = self.hooks_notif
-        self.remote.hooks_request_inher = self.hooks_request
-        echo(
-            "con",
-            f"Connected to Host. Server has been given the alias '{self.remote.id}'.",
-        )
-        self.listening = loop.create_task(self.remote.loop(helpers))
-        self.listening.add_done_callback(self.report)
-        await self.setup()
-        return True
+        try:
+            self.remote = Remote(loop, *streams, rtype="Server", remote_id="000")
+            self.remote.hooks_notif_inher = self.hooks_notif
+            self.remote.hooks_request_inher = self.hooks_request
+            self.listening = loop.create_task(self.remote.loop(helpers))
+            self.listening.add_done_callback(self.report)
+        except:
+            return False
+        else:
+            try:
+                await self.setup()
+            except:
+                warn(
+                    f"Connection to {self.remote.id!r} successful, but Client"
+                    f" Setup failed."
+                )
+                return False
+            else:
+                echo(
+                    "con",
+                    f"Connected to Host. Server has been given the alias"
+                    f" {self.remote.id!r}.",
+                )
+
+            return True
 
     async def disconnect(self):
         """Forcibly break the Remote Connection. The Listening Task will be
