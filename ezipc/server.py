@@ -17,7 +17,7 @@ from datetime import datetime as dt
 from functools import partial, wraps
 from inspect import signature
 from socket import AF_INET, SOCK_DGRAM, socket
-from typing import Callable, Dict, Optional, Union, overload
+from typing import Callable, Dict, Optional, overload, Union
 
 from .remote import (
     can_encrypt,

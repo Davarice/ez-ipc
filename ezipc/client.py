@@ -9,7 +9,7 @@ from asyncio import (
 )
 from datetime import datetime as dt
 from functools import partial, wraps
-from typing import Callable, Optional, Union, overload
+from typing import Callable, Optional, overload, Union
 
 from .remote import (
     can_encrypt,

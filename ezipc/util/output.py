@@ -2,7 +2,7 @@
 
 from datetime import datetime as dt
 from logging import DEBUG, Formatter, getLogger, StreamHandler
-from typing import Callable, Dict, List, Tuple, Union, overload
+from typing import Callable, Dict, List, overload, Tuple, Union
 
 
 NOCOLOR = lambda s: s
