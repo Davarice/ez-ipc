@@ -17,9 +17,17 @@ from datetime import datetime as dt
 from functools import partial, wraps
 from inspect import signature
 from socket import AF_INET, SOCK_DGRAM, socket
-from typing import Dict, Optional, Union
+from typing import Callable, Dict, Optional, Union, overload
 
-from .remote import can_encrypt, rpc_response, Remote, RemoteError, request_handler
+from .remote import (
+    can_encrypt,
+    counter,
+    Remote,
+    RemoteError,
+    request_handler,
+    rpc_response,
+    TV,
+)
 from .util import callback_response, echo, err, P, warn
 
 
@@ -110,8 +118,8 @@ class Server:
         self.startup: dt = dt.utcnow()
 
         self.total_clients: int = 0
-        self.total_sent: Counter = Counter(byte=0, notif=0, request=0, response=0)
-        self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
+        self.total_sent: Counter = counter()
+        self.total_recv: Counter = counter()
 
         self.hooks_notif = {}
         self.hooks_request = {}
@@ -125,6 +133,14 @@ class Server:
         @self.hook_request("TIME")
         async def cb_time(_, remote: Remote):
             return {"startup": self.startup.timestamp(), "id": remote.id}
+
+    @overload
+    def hook_notif(self, method: str) -> Callable[[TV], TV]:
+        ...
+
+    @overload
+    def hook_notif(self, method: str, func: TV) -> TV:
+        ...
 
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
@@ -144,6 +160,14 @@ class Server:
 
             self.hooks_notif[method] = handler
             return func
+
+    @overload
+    def hook_request(self, method: str) -> Callable[[TV], TV]:
+        ...
+
+    @overload
+    def hook_request(self, method: str, func: TV) -> TV:
+        ...
 
     def hook_request(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Requests of the

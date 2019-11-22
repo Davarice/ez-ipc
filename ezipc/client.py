@@ -9,7 +9,7 @@ from asyncio import (
 )
 from datetime import datetime as dt
 from functools import partial, wraps
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, overload
 
 from .remote import (
     can_encrypt,
@@ -18,6 +18,7 @@ from .remote import (
     RemoteError,
     request_handler,
     rpc_response,
+    TV,
 )
 from .util import callback_response, echo, err, P, warn
 
@@ -94,6 +95,14 @@ class Client:
         else:
             warn("Failed to get Server Uptime.")
 
+    @overload
+    def hook_notif(self, method: str) -> Callable[[TV], TV]:
+        ...
+
+    @overload
+    def hook_notif(self, method: str, func: TV) -> TV:
+        ...
+
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
@@ -112,6 +121,14 @@ class Client:
 
             self.hooks_notif[method] = handler
             return func
+
+    @overload
+    def hook_request(self, method: str) -> Callable[[TV], TV]:
+        ...
+
+    @overload
+    def hook_request(self, method: str, func: TV) -> TV:
+        ...
 
     def hook_request(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Requests of the

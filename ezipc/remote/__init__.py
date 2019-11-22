@@ -20,7 +20,7 @@ from collections import Counter
 from datetime import datetime as dt
 from functools import partial
 from json import JSONDecodeError, loads
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, overload, TypeVar, Union
 from uuid import uuid4
 
 from ..util.output import echo, err as err_, hl_method, hl_remote, hl_rtype, warn
@@ -34,6 +34,10 @@ from .protocol import (
     make_request,
     make_response,
 )
+
+
+counter = lambda: Counter(byte=0, notif=0, request=0, response=0)
+TV = TypeVar("TV", bound=Callable)
 
 
 def mkid(remote: "Remote") -> str:
@@ -99,8 +103,8 @@ class Remote:
         self.futures: Dict[str, Future] = {}
 
         self.lines: Queue = Queue()
-        self.total_sent: Counter = Counter(byte=0, notif=0, request=0, response=0)
-        self.total_recv: Counter = Counter(byte=0, notif=0, request=0, response=0)
+        self.total_sent: Counter = counter()
+        self.total_recv: Counter = counter()
 
         self.group: set = group
         self.rtype: str = rtype
@@ -289,6 +293,14 @@ class Remote:
     def handle_response(self, **kw) -> Callable:
         return response_handler(self, **kw)
 
+    @overload
+    def hook_notif(self, method: str) -> Callable[[TV], TV]:
+        ...
+
+    @overload
+    def hook_notif(self, method: str, func: TV) -> TV:
+        ...
+
     def hook_notif(self, method: str, func=None):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
@@ -306,6 +318,14 @@ class Remote:
                 return func_
 
             return hook
+
+    @overload
+    def hook_request(self, method: str) -> Callable[[TV], TV]:
+        ...
+
+    @overload
+    def hook_request(self, method: str, func: TV) -> TV:
+        ...
 
     def hook_request(self, method: str, func=None) -> Callable:
         """Signal to the Remote that `func` is waiting for Requests of the

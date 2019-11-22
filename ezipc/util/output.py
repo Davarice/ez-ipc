@@ -2,7 +2,7 @@
 
 from datetime import datetime as dt
 from logging import DEBUG, Formatter, getLogger, StreamHandler
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union, overload
 
 
 NOCOLOR = lambda s: s
@@ -84,6 +84,16 @@ class _Printer:
 P = _Printer()
 
 
+@overload
+def echo(text: Union[str, List[str]], color=""):
+    ...
+
+
+@overload
+def echo(etype: str, text: Union[str, List[str]], color=""):
+    ...
+
+
 def echo(etype: str, text: Union[str, List[str]] = None, color=""):
     if text is None:
         etype, text = "info", etype
@@ -97,13 +107,13 @@ def echo(etype: str, text: Union[str, List[str]] = None, color=""):
 
 def err(text: str, exc: BaseException = None):
     if exc is not None:
-        text += f" {type(exc).__name__} - {exc}"
+        text += f" {type(exc).__name__!r}: {exc}"
     echo("err", text, T.red)
 
 
 def warn(text: str, exc: BaseException = None):
     if exc is not None:
-        text += f" {type(exc).__name__} - {exc}"
+        text += f" {type(exc).__name__!r}: {exc}"
     echo("warn", text, T.bright_yellow)
 
 
