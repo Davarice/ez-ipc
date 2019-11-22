@@ -255,19 +255,18 @@ class Server:
             warn(f"Encryption Request to {remote!r} timed out.")
 
     async def terminate(self, reason: str = "Server Closing"):
-        for remote in self.remotes:
+        for remote in list(self.remotes):
             await remote.terminate(reason)
+            self.drop(remote)
         self.remotes.clear()
-        # g = gather(*self.listeners, return_exceptions=True)
-        # g.cancel()
-        # await g
+
         for task in self.listeners:
             task.cancel()
 
-        # self.report()
         if self.server.is_serving():
             self.server.close()
             await self.server.wait_closed()
+
         self.server = None
         echo("dcon", "Server closed.")
 
@@ -275,8 +274,9 @@ class Server:
         """Callback executed by AsyncIO when a Client contacts the Server."""
         echo(
             "con",
-            f"Incoming Connection from Client at "
-            f"`{str_out.get_extra_info('peername', ('Unknown Address', 0))[0]}`.",
+            "Incoming Connection from Client at `{}`.".format(
+                str_out.get_extra_info("peername", ("Unknown Address", 0))[0]
+            ),
         )
         remote = Remote(self.eventloop, str_in, str_out, rtype="Client")
         self.total_clients += 1
@@ -284,7 +284,6 @@ class Server:
         # Update the Client Hooks with our own.
         remote.hooks_notif_inher = self.hooks_notif
         remote.hooks_request_inher = self.hooks_request
-
         remote.startup = self.startup
 
         self.remotes.add(remote)
