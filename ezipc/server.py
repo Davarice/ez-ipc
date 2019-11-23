@@ -2,6 +2,7 @@ from asyncio import (
     AbstractEventLoop,
     AbstractServer,
     CancelledError,
+    Future,
     gather,
     get_event_loop,
     run,
@@ -28,7 +29,7 @@ from .remote import (
     rpc_response,
     TV,
 )
-from .util import callback_response, echo, err, P, warn
+from .util import callback_response, echo, err, hl_method, P, warn
 
 
 __all__ = (
@@ -212,55 +213,58 @@ class Server:
         self.hooks_connection.append(func)
         return func
 
-    async def broadcast(
-        self,
-        meth: str,
-        params: Union[dict, list] = None,
-        default=None,
-        *,
-        callback=None,
-        **kw,
-    ) -> Dict[Remote, Task]:
-        if not self.remotes:
-            return {}
-
-        reqs = {
-            r: self.eventloop.create_task(
-                r.request_wait(meth, params, default, callback=callback, **kw)
-            )
-            for r in self.remotes
-        }
-        return reqs
-
     async def bcast_notif(
         self, meth: str, params: Union[dict, list] = None, **kw,
     ) -> Dict[Remote, Task]:
+        """Send a Notification to every connected Remote. Return a Dict which
+            maps each Remote to its respective sending Task. These Tasks must
+            then be awaited.
+        """
+        echo(
+            "cast",
+            f"Broadcasting {hl_method(meth)} Notif to {len(self.remotes)}"
+            f" Remote{'' if len(self.remotes) == 1 else 's'}.",
+        )
         if not self.remotes:
             return {}
 
-        reqs = {
-            r: self.eventloop.create_task(r.notif(meth, params, **kw))
-            for r in self.remotes
+        return {
+            remote: self.eventloop.create_task(
+                remote.notif(meth, params, quiet=True, **kw)
+            )
+            for remote in self.remotes
         }
-        return reqs
 
-    async def broadcast_wait(
-        self,
-        meth: str,
-        params: Union[dict, list] = None,
-        default=None,
-        *,
-        callback=None,
-        **kw,
-    ):
-        reqs = await self.broadcast(meth, params, default, callback=callback, **kw)
+    async def bcast_request(
+        self, meth: str, params: Union[dict, list] = None, **kw,
+    ) -> Dict[Remote, Future]:
+        """Send a Request to every connected Remote. Return a Dict which maps
+            each Remote to the Future (or Exception) returned from the
+            respective message sent.
 
-        wins = await gather(*reqs.values(), return_exceptions=True)
-        total = len(reqs)
-        wincount = total - wins.count(None)
+        Unlike ``bcast_notif()``, this Method will await sending the Message.
+            The objects returned are the Futures which will receive the
+            Responses from the Remote.
+        """
+        echo(
+            "cast",
+            f"Broadcasting {hl_method(meth)} Request to {len(self.remotes)}"
+            f" Remote{'' if len(self.remotes) == 1 else 's'}.",
+        )
+        if not self.remotes:
+            return {}
 
-        echo("win", f"Messages successfully Broadcast: {wincount}/{total}")
-        return list(zip(reqs.keys(), wins))
+        tasks: Dict[Remote, Task] = {
+            remote: self.eventloop.create_task(
+                remote.request(meth, params, quiet=True, **kw)
+            )
+            for remote in self.remotes
+        }
+        await gather(*tasks.values(), return_exceptions=True)
+        return {
+            remote: (task.exception() or task.result())
+            for remote, task in tasks.items()
+        }
 
     def drop(self, remote: Remote):
         if remote in self.remotes:

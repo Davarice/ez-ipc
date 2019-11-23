@@ -465,14 +465,15 @@ class Remote:
                 await helper_runner
 
     async def notif(
-        self, meth: str, params: Union[dict, list] = None, nohandle: bool = False
+        self, meth: str, params: Union[dict, list] = None, nohandle: bool = False, quiet: bool = False,
     ) -> None:
         """Assemble and send a JSON-RPC Notification with the given data."""
         if not self.open:
             return
 
         try:
-            echo("send", f"Sending a {hl_method(meth)} Notification to {self}.")
+            if not quiet:
+                echo("send", f"Sending {hl_method(meth)} Notification to {self}.")
             self.total_sent["notif"] += 1
             if isinstance(params, dict):
                 await self.send(make_notif(meth, **params))
@@ -492,6 +493,7 @@ class Remote:
         *,
         callback: Callable = None,
         nohandle: bool = False,
+        quiet: bool = False,
     ) -> Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
@@ -503,7 +505,8 @@ class Remote:
             future.set_exception(ConnectionResetError)
             return future
 
-        echo("send", f"Sending {hl_method(meth)} Request to {self}.")
+        if not quiet:
+            echo("send", f"Sending {hl_method(meth)} Request to {self}.")
         self.total_sent["request"] += 1
 
         if isinstance(params, dict):
