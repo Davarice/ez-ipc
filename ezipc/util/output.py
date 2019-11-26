@@ -50,7 +50,7 @@ colors: Dict[str, Tuple[Callable[[str], str], str, int]] = {
 
     "recv": (T.white, "-->", 3),
     "send": (T.bold_black, "<--", 3),
-    "cast": (T.bold_white, "#--", 3),
+    "cast": (T.bold_white, "#=-", 3),
     "dbug": (T.yellow, "[!]", 3),
 }
 
@@ -58,6 +58,9 @@ colors: Dict[str, Tuple[Callable[[str], str], str, int]] = {
 hl_method = T.bold_yellow
 hl_remote = T.bold_magenta
 hl_rtype = T.underline
+
+res_bad = T.red
+res_good = T.green
 
 
 class _Printer:
