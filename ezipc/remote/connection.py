@@ -22,7 +22,6 @@ else:
     can_encrypt: bool = True
 
 
-encoding: str = "utf-16"
 sep: bytes = b"\n" * 5
 
 
@@ -30,6 +29,7 @@ class Connection:
     __slots__ = (
         "instr",
         "outstr",
+        "encoding",
         "can_encrypt",
         "open",
         "_key",
@@ -40,9 +40,12 @@ class Connection:
         "total_recv",
     )
 
-    def __init__(self, instr: StreamReader, outstr: StreamWriter):
+    def __init__(
+        self, instr: StreamReader, outstr: StreamWriter, *, encoding: str = "utf-16",
+    ):
         self.instr: StreamReader = instr
         self.outstr: StreamWriter = outstr
+        self.encoding: str = encoding
 
         self.can_encrypt: bool = can_encrypt
         self.open: bool = True
@@ -96,11 +99,11 @@ class Connection:
     async def read(self) -> str:
         ctext: bytes = await self.instr.readuntil(sep)
         self.total_recv += len(ctext)
-        ptext: str = self._decrypt(ctext[: -len(sep)]).decode(encoding)
+        ptext: str = self._decrypt(ctext[: -len(sep)]).decode(self.encoding)
         return ptext
 
     async def write(self, ptext: str) -> int:
-        ctext: bytes = self._encrypt(ptext.encode(encoding))
+        ctext: bytes = self._encrypt(ptext.encode(self.encoding))
         self.outstr.write(ctext)
         self.outstr.write(sep)
 
