@@ -101,7 +101,10 @@ class Remote:
         self.instr: StreamReader = instr
         self.outstr: StreamWriter = outstr
         self.connection: Connection = Connection(instr, outstr)
-        self.addr, self.port = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
+
+        ap = self.outstr.get_extra_info("peername", ("0.0.0.0", 0))
+        self.addr: str = ap[0]
+        self.port: int = ap[1]
 
         self.hooks_notif: Dict[str, Callable] = {}
         self.hooks_notif_inher: Dict[str, Callable] = {}
@@ -169,7 +172,7 @@ class Remote:
 
         @self.handle_request("RSA.CONF")
         async def cb_rsa_confirm(data: dict, remote: Remote) -> rpc_response:
-            if remote.connection.can_activate():
+            if remote.connection.encryption_ready():
                 await remote.respond(data["id"], data["method"], res=[True])
                 remote.connection.begin_encryption()
                 echo("win", "Connection Secured by RSA Key Exchange.")
