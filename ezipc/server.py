@@ -10,8 +10,6 @@ from asyncio import (
     StreamReader,
     StreamWriter,
     Task,
-    TimeoutError,
-    wait_for,
 )
 from collections import Counter, MutableSet
 from datetime import datetime as dt
@@ -125,15 +123,15 @@ class Server:
 
         self.hooks_notif = {}
         self.hooks_request = {}
-        self.hooks_connection = [self.encrypt_remote]
+        self.hooks_connection = []
         self.hooks_disconnect = []
 
     def setup(self, *_a, **_kw):
         """Execute all prerequisites to running, before running. Meant to be
-            overwritten by Subclasses.
+            extended by Subclasses.
         """
 
-        @self.hook_request("TIME")
+        @self.hook_request("ETC.INIT")
         async def cb_time(_, remote: Remote):
             return {"startup": self.startup.timestamp(), "id": remote.id}
 
@@ -280,16 +278,6 @@ class Server:
             self.total_sent.update(remote.total_sent)
             self.total_recv.update(remote.total_recv)
             self.remotes.remove(remote)
-
-    async def encrypt_remote(self, remote: Remote):
-        echo("info", f"Starting Secure Connection with {remote}...")
-        try:
-            if await wait_for(remote.enable_rsa(), 10):
-                echo("win", f"Secure Connection established with {remote}.")
-            else:
-                warn(f"Failed to establish Secure Connection with {remote!r}.")
-        except TimeoutError:
-            warn(f"Encryption Request to {remote!r} timed out.")
 
     async def terminate(self, reason: str = "Server Closing"):
         for remote in list(self.remotes):

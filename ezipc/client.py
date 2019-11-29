@@ -83,7 +83,7 @@ class Client:
         return bool(self.remote and not self.remote.outstr.is_closing())
 
     async def setup(self):
-        response = await self.remote.request_wait("TIME")
+        response = await self.remote.request_wait("ETC.INIT")
 
         if response:
             self.remote.id = response.get("id") or mkid(self.remote)
@@ -93,7 +93,23 @@ class Client:
                 P.startup = self.startup
                 echo("info", f"Server Uptime: {dt.utcnow() - self.startup}")
         else:
+            self.remote.id = mkid(self.remote)
             warn("Failed to get Server Uptime.")
+
+        echo("info", f"Starting Secure Connection with {self.remote}...")
+        try:
+            if await wait_for(self.remote.enable_rsa(), 10):
+                echo("win", f"Connection with {self.remote} secured.")
+            else:
+                err(
+                    f"Failed to perform Key Exchange with {self.remote!r}. This"
+                    f" Connection is !>>> NOT SECURE <<<!"
+                )
+        except TimeoutError:
+            err(
+                f"Encryption Request to {self.remote!r} timed out. This"
+                f" Connection is !>>> NOT SECURE <<<!"
+            )
 
     @overload
     def hook_notif(self, method: str) -> Callable[[TV], TV]:
