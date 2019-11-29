@@ -83,6 +83,7 @@ class Server:
         "hooks_notif",
         "hooks_request",
         "hooks_connection",
+        "hooks_disconnect",
     )
 
     def __init__(
@@ -125,6 +126,7 @@ class Server:
         self.hooks_notif = {}
         self.hooks_request = {}
         self.hooks_connection = [self.encrypt_remote]
+        self.hooks_disconnect = []
 
     def setup(self, *_a, **_kw):
         """Execute all prerequisites to running, before running. Meant to be
@@ -211,6 +213,13 @@ class Server:
             new Connection.
         """
         self.hooks_connection.append(func)
+        return func
+
+    def hook_disconnect(self, func):
+        """Add a Function to a List of Callables that will be called whenever a
+            Remote is closed.
+        """
+        self.hooks_disconnect.append(func)
         return func
 
     async def bcast_notif(
@@ -347,12 +356,13 @@ class Server:
 
         finally:
             try:
-                # Try not to drop the remote before the RSA Handshake is done.
-                # await wait_for(rsa, 3)
-                pass
-            except (RuntimeError, TimeoutError):
-                pass
-            self.drop(remote)
+                for hook in self.hooks_disconnect:
+                    try:
+                        await hook(remote)
+                    except Exception as e:
+                        err(f"Failed to run {hook.__name__!r} on {remote!r}:", e)
+            finally:
+                self.drop(remote)
 
     async def run(self, loop=None):
         """Server Coroutine. Does not setup or wrap the Server. Intended for use
