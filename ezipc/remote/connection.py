@@ -1,13 +1,21 @@
 from asyncio import StreamReader, StreamWriter
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 try:
+    # noinspection PyPackageRequirements
+    from nacl.encoding import HexEncoder
+
     # noinspection PyPackageRequirements
     from nacl.exceptions import CryptoError
 
     # noinspection PyPackageRequirements
     from nacl.public import Box, PrivateKey, PublicKey
+
+    # noinspection PyPackageRequirements
+    from nacl.signing import SigningKey, VerifyKey
+
 except ImportError as ex:
+    HexEncoder = None
 
     class CryptoError(Exception):
         pass
@@ -15,8 +23,11 @@ except ImportError as ex:
     Box = None
     PrivateKey = None
     PublicKey = None
-    can_encrypt: bool = False
 
+    SigningKey = None
+    VerifyKey = None
+
+    can_encrypt: bool = False
     print("Encryption could not be enabled:", ex)
 else:
     can_encrypt: bool = True
@@ -32,8 +43,10 @@ class Connection:
         "encoding",
         "can_encrypt",
         "open",
-        "_key",
-        "key_other",
+        "_key_priv",
+        "_key_sign",
+        "key_other_pub",
+        "key_other_ver",
         "_box",
         "box",
         "total_sent",
@@ -50,8 +63,12 @@ class Connection:
         self.can_encrypt: bool = can_encrypt
         self.open: bool = True
 
-        self._key: PrivateKey = PrivateKey.generate() if self.can_encrypt else None
-        self.key_other: PublicKey = None
+        self._key_priv: PrivateKey = PrivateKey.generate() if self.can_encrypt else None
+        self._key_sign: SigningKey = SigningKey.generate() if self.can_encrypt else None
+
+        self.key_other_pub: PublicKey = None
+        self.key_other_ver: VerifyKey = None
+
         self._box: Box = None
         self.box: Box = None
 
@@ -59,25 +76,45 @@ class Connection:
         self.total_recv: int = 0
 
     @property
-    def key(self) -> Optional[str]:
-        return bytes(self._key.public_key).hex() if self.can_encrypt else None
+    def encrypted(self) -> bool:
+        return bool(self.box)
+
+    @property
+    def keys(self) -> Optional[List[str]]:
+        return (
+            [
+                self._key_priv.public_key.encode(HexEncoder).decode(),
+                self._key_sign.verify_key.encode(HexEncoder).decode(),
+            ]
+            if self.can_encrypt
+            else None
+        )
 
     def _decrypt(self, ctext: bytes) -> bytes:
-        if self.box:
-            return self.box.decrypt(ctext)
+        if self.encrypted:
+            ptext = self.box.decrypt(ctext)
+            if self.key_other_ver:
+                return self.key_other_ver.verify(ptext)
+            else:
+                return ptext
         else:
             return ctext
 
     def _encrypt(self, ptext: bytes) -> bytes:
-        if self.box:
+        if self.encrypted:
+            if self._key_sign:
+                ptext = self._key_sign.sign(ptext)
+
             return self.box.encrypt(ptext)
         else:
             return ptext
 
-    def add_key(self, pubkey: str) -> None:
-        if pubkey and self.can_encrypt:
-            self.key_other = PublicKey(bytes.fromhex(pubkey))
-            self._box = Box(self._key, self.key_other)
+    def add_keys(self, pubkey: str, verkey: str) -> None:
+        if pubkey and verkey and self.can_encrypt:
+            self.key_other_pub = PublicKey(pubkey.encode(), HexEncoder)
+            self.key_other_ver = VerifyKey(verkey.encode(), HexEncoder)
+
+            self._box = Box(self._key_priv, self.key_other_pub)
 
     def begin_encryption(self) -> None:
         self.box = self._box

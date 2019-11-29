@@ -133,17 +133,17 @@ class Remote:
 
     @property
     def is_secure(self) -> bool:
-        return bool(self.connection.can_encrypt and self.connection.box)
+        return bool(self.connection.can_encrypt and self.connection.encrypted)
 
     @property
     def open(self) -> bool:
         return self.connection.open
 
-    def __str__(self) -> str:
-        return hl_rtype(f"{self.rtype} {hl_remote(self.id)}")
-
     def __repr__(self) -> str:
         return f"{self.rtype} {self.id}"
+
+    def __str__(self) -> str:
+        return hl_rtype(f"{self.rtype} {hl_remote(self.id)}")
 
     def _add_hooks(self) -> None:
         """Add the initial hooks for the connection: Ping, and the two hooks
@@ -164,8 +164,8 @@ class Remote:
                         "(The connection is not encrypted yet.)",
                     ],
                 )
-                remote.connection.add_key(data.get("params", [None])[0])
-                return [remote.connection.key]
+                remote.connection.add_keys(*data.get("params", [None, None]))
+                return remote.connection.keys
             else:
                 err_("Cannot establish a Secure Connection.")
                 return 92, "Encryption Unavailable"
@@ -183,17 +183,17 @@ class Remote:
         if not self.connection.can_encrypt:
             warn("Cannot enable RSA: Encryption is not available.")
             return False
-        elif self.connection.box:
+        elif self.connection.encrypted:
             warn("Cannot enable RSA: Encryption is already in progress.")
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
-            remote_key = (
-                await self.request_wait("RSA.EXCH", [self.connection.key], [None])
-            )[0]
+            remote_pub, remote_ver = (
+                await self.request_wait("RSA.EXCH", self.connection.keys, [None, None])
+            )
 
-            if remote_key:
-                self.connection.add_key(remote_key)
+            if remote_pub and remote_ver:
+                self.connection.add_keys(remote_pub, remote_ver)
             else:
                 return False
 
@@ -447,9 +447,7 @@ class Remote:
                 # Receive text from the Input Stream.
                 if isinstance(item, Exception):
                     # If we received an Exception, the Decryption failed.
-                    warn(
-                        f"Decryption from {self!r} failed:", item,
-                    )
+                    warn(f"Decryption from {self!r} failed:", item)
                 else:
                     # Otherwise, add it to the Queue.
                     await self.lines.put(item)
