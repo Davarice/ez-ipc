@@ -6,7 +6,7 @@ https://www.jsonrpc.org/specification
 
 from enum import IntEnum
 import json
-from typing import Tuple, Union
+from typing import Hashable, overload, Tuple, Type, TypedDict, Union
 from uuid import uuid4
 
 
@@ -28,6 +28,9 @@ req_sub = id_ | method_
 req_sup = req_sub | params_
 res_sub = frozenset({"error", "result"})
 res_sup = id_ | res_sub
+
+
+ErrorRPC: Type[dict] = TypedDict("ErrorRPC", dict(code=int, message=str, data=Hashable))
 
 
 def _make(meth: str, *args, **kwargs) -> dict:
@@ -61,7 +64,7 @@ class Errors:
     """
 
     @staticmethod
-    def new(code: int, message: str, data=None) -> dict:
+    def new(code: int, message: str, data: Hashable = None) -> ErrorRPC:
         """Make an Error, to be sent in a Response to a failed Request.
 
         Contains:
@@ -75,27 +78,37 @@ class Errors:
         return err
 
     @classmethod
-    def parse_error(cls, data=None) -> dict:
+    def parse_error(cls, data: Hashable = None) -> ErrorRPC:
         return cls.new(-32700, "Parse error", data)
 
     @classmethod
-    def invalid_request(cls, data=None) -> dict:
+    def invalid_request(cls, data: Hashable = None) -> ErrorRPC:
         return cls.new(-32600, "Invalid Request", data)
 
     @classmethod
-    def method_not_found(cls, data=None) -> dict:
+    def method_not_found(cls, data: Hashable = None) -> ErrorRPC:
         return cls.new(-32601, "Method not found", data)
 
     @classmethod
-    def invalid_params(cls, data=None) -> dict:
+    def invalid_params(cls, data: Hashable = None) -> ErrorRPC:
         return cls.new(-32602, "Invalid params", data)
 
     @classmethod
-    def server_error(cls, data=None) -> dict:
+    def server_error(cls, data: Hashable = None) -> ErrorRPC:
         return cls.new(-32603, "Internal error", data)
 
 
-def make_notif(*args, **kwargs) -> str:
+@overload
+def make_notif(meth: str, *args) -> str:
+    ...
+
+
+@overload
+def make_notif(meth: str, **kwargs) -> str:
+    ...
+
+
+def make_notif(meth: str, *args, **kwargs) -> str:
     """Make a Notification, to be sent without expectation of a Response.
 
     Contains:
@@ -105,25 +118,47 @@ def make_notif(*args, **kwargs) -> str:
         ["params"] (list, dict): The values to be used in the execution of the
             method specified.
     """
-    req = _make(*args, **kwargs)
+    req = _make(meth, *args, **kwargs)
 
     return json.dumps(req, **JSON_OPTS)
 
 
-def make_request(*args, **kwargs) -> Tuple[str, str]:
+@overload
+def make_request(meth: str, *args) -> Tuple[str, str]:
+    ...
+
+
+@overload
+def make_request(meth: str, **kwargs) -> Tuple[str, str]:
+    ...
+
+
+def make_request(meth: str, *args, **kwargs) -> Tuple[str, str]:
     """Make a Request, a message that will yield a Response.
 
     Contains ALL fields documented in `make_notif` above, PLUS:
         "id": Newly-generated UUID of the Request, for replication in Response.
     """
-    req = _make(*args, **kwargs)
+    req = _make(meth, *args, **kwargs)
     mid = _id_new()
     req["id"] = mid
 
     return json.dumps(req, **JSON_OPTS), mid
 
 
-def make_response(mid: str, res: Union[dict, list] = None, err: dict = None) -> str:
+@overload
+def make_response(mid: str, *, res: Union[dict, list] = None) -> str:
+    ...
+
+
+@overload
+def make_response(mid: str, *, err: ErrorRPC = None) -> str:
+    ...
+
+
+def make_response(
+    mid: str, *, res: Union[dict, list] = None, err: ErrorRPC = None
+) -> str:
     """Make a Response, to be sent in reply to a Request.
 
     Contains:
@@ -144,7 +179,8 @@ def make_response(mid: str, res: Union[dict, list] = None, err: dict = None) -> 
     elif res is not None:
         resp["result"] = res
     else:
-        raise ValueError("Response MUST be provided either a Result or an Error.")
+        resp["result"] = []
+        # raise ValueError("Response MUST be provided either a Result or an Error.")
     resp["id"] = mid
 
     return json.dumps(resp, **JSON_OPTS)

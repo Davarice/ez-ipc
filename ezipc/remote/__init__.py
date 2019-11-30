@@ -37,6 +37,7 @@ from .connection import can_encrypt, Connection
 from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
 from .protocol import (
+    ErrorRPC,
     Errors,
     JRPC,
     make_notif,
@@ -513,6 +514,7 @@ class Remote:
         *,
         callback: Callable = None,
         nohandle: bool = False,
+        timeout: float = 0,
         quiet: bool = False,
     ) -> Future:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
@@ -550,7 +552,10 @@ class Remote:
             if nohandle:
                 raise e
         finally:
-            return future
+            if timeout > 0:
+                return wait_for(future, timeout)
+            else:
+                return future
 
     async def request_wait(
         self,
@@ -560,7 +565,7 @@ class Remote:
         *,
         callback: Callable = None,
         nohandle: bool = False,
-        timeout: int = 10,
+        timeout: float = 10,
         raise_remote_err: bool = False,
     ) -> Any:
         """Send a JSON-RPC Request with the given data, the same as
@@ -595,7 +600,7 @@ class Remote:
         mid: str,
         method: str = None,
         *,
-        err: dict = None,
+        err: ErrorRPC = None,
         res: Union[dict, list] = None,
         nohandle: bool = False,
     ) -> None:
