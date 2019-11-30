@@ -1,5 +1,7 @@
 """Module providing EZ-IPC Exceptions."""
 
+from typing import Optional
+
 
 class EZError(Exception):
     """Generic Error. Catches all custom Exceptions of the Package."""
@@ -16,7 +18,7 @@ class RemoteError(EZError):
     """
 
     @classmethod
-    def from_message(cls, data):
+    def from_message(cls, data: dict) -> Optional["RemoteError"]:
         errdat = data.get("error")
         if not errdat:
             return None
@@ -42,6 +44,7 @@ class RemoteError(EZError):
         return self.args[3]
 
     def __str__(self):
-        return "Error {}: {}: {} (ID: {})".format(
-            self.code, self.message, repr(self.data), self.id
-        )
+        # return "Error {}: {}: {} (ID: {})".format(
+        #     self.code, self.message, repr(self.data), self.id
+        # )
+        return f"Error {self.code!r}: {self.message}"
