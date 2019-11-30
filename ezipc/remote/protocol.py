@@ -5,8 +5,8 @@ https://www.jsonrpc.org/specification
 """
 
 from enum import IntEnum
-import json
-from typing import Hashable, overload, Tuple, Type, TypedDict, Union
+from json import dumps
+from typing import Any, FrozenSet, overload, Tuple, TypedDict, Union
 from uuid import uuid4
 
 
@@ -14,23 +14,23 @@ JSON_OPTS = {"separators": (",", ":")}
 __version__ = "2.0"
 
 
-basic_ = frozenset({"jsonrpc"})
+basic_: FrozenSet[str] = frozenset({"jsonrpc"})
 
-id_ = basic_ | frozenset({"id"})
-method_ = basic_ | frozenset({"method"})
-params_ = basic_ | frozenset({"params"})
+id_: FrozenSet[str] = basic_ | frozenset({"id"})
+method_: FrozenSet[str] = basic_ | frozenset({"method"})
+params_: FrozenSet[str] = basic_ | frozenset({"params"})
 
-err_sub = frozenset({"code", "message"})
-err_sup = err_sub | frozenset({"data"})
+err_sub: FrozenSet[str] = frozenset({"code", "message"})
+err_sup: FrozenSet[str] = err_sub | frozenset({"data"})
 
-notif_sup = method_ | params_
-req_sub = id_ | method_
-req_sup = req_sub | params_
-res_sub = frozenset({"error", "result"})
-res_sup = id_ | res_sub
+notif_sup: FrozenSet[str] = method_ | params_
+req_sub: FrozenSet[str] = id_ | method_
+req_sup: FrozenSet[str] = req_sub | params_
+res_sub: FrozenSet[str] = frozenset({"error", "result"})
+res_sup: FrozenSet[str] = id_ | res_sub
 
 
-ErrorRPC: Type[dict] = TypedDict("ErrorRPC", dict(code=int, message=str, data=Hashable))
+ErrorRPC = TypedDict("ErrorRPC", dict(code=int, message=str, data=Any))
 
 
 def _make(meth: str, *args, **kwargs) -> dict:
@@ -63,8 +63,10 @@ class Errors:
         errors, as listed in section 5.1 of the JSON-RPC specification.
     """
 
+    __slots__ = ()
+
     @staticmethod
-    def new(code: int, message: str, data: Hashable = None) -> ErrorRPC:
+    def new(code: int, message: str, data=None) -> ErrorRPC:
         """Make an Error, to be sent in a Response to a failed Request.
 
         Contains:
@@ -78,23 +80,23 @@ class Errors:
         return err
 
     @classmethod
-    def parse_error(cls, data: Hashable = None) -> ErrorRPC:
+    def parse_error(cls, data=None) -> ErrorRPC:
         return cls.new(-32700, "Parse error", data)
 
     @classmethod
-    def invalid_request(cls, data: Hashable = None) -> ErrorRPC:
+    def invalid_request(cls, data=None) -> ErrorRPC:
         return cls.new(-32600, "Invalid Request", data)
 
     @classmethod
-    def method_not_found(cls, data: Hashable = None) -> ErrorRPC:
+    def method_not_found(cls, data=None) -> ErrorRPC:
         return cls.new(-32601, "Method not found", data)
 
     @classmethod
-    def invalid_params(cls, data: Hashable = None) -> ErrorRPC:
+    def invalid_params(cls, data=None) -> ErrorRPC:
         return cls.new(-32602, "Invalid params", data)
 
     @classmethod
-    def server_error(cls, data: Hashable = None) -> ErrorRPC:
+    def server_error(cls, data=None) -> ErrorRPC:
         return cls.new(-32603, "Internal error", data)
 
 
@@ -120,7 +122,7 @@ def make_notif(meth: str, *args, **kwargs) -> str:
     """
     req = _make(meth, *args, **kwargs)
 
-    return json.dumps(req, **JSON_OPTS)
+    return dumps(req, **JSON_OPTS)
 
 
 @overload
@@ -143,11 +145,11 @@ def make_request(meth: str, *args, **kwargs) -> Tuple[str, str]:
     mid = _id_new()
     req["id"] = mid
 
-    return json.dumps(req, **JSON_OPTS), mid
+    return dumps(req, **JSON_OPTS), mid
 
 
 @overload
-def make_response(mid: str, *, res: Union[dict, list] = None) -> str:
+def make_response(mid: str, *, res: Union[dict, list, tuple] = None) -> str:
     ...
 
 
@@ -157,7 +159,7 @@ def make_response(mid: str, *, err: ErrorRPC = None) -> str:
 
 
 def make_response(
-    mid: str, *, res: Union[dict, list] = None, err: ErrorRPC = None
+    mid: str, *, res: Union[dict, list, tuple] = None, err: ErrorRPC = None
 ) -> str:
     """Make a Response, to be sent in reply to a Request.
 
@@ -170,20 +172,23 @@ def make_response(
         "id": The UUID of the Request that prompted this Response.
     """
     resp = {"jsonrpc": __version__}
-    if err:
-        if not (err_sub <= set(err.keys()) <= err_sup):
+    if res and err:
+        raise ValueError("Response must not contain both Result and Error.")
+    elif err:
+        if err_sub <= set(err.keys()) <= err_sup:
+            resp["error"] = err
+        else:
             raise ValueError(
                 "Error must have keys 'code', 'message', and, optionally, 'data'."
             )
-        resp["error"] = err
-    elif res is not None:
-        resp["result"] = res
-    else:
+    elif res is None:
         resp["result"] = []
         # raise ValueError("Response MUST be provided either a Result or an Error.")
-    resp["id"] = mid
+    else:
+        resp["result"] = res
 
-    return json.dumps(resp, **JSON_OPTS)
+    resp["id"] = mid
+    return dumps(resp, **JSON_OPTS)
 
 
 class JRPC(IntEnum):

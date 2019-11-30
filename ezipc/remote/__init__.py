@@ -485,7 +485,11 @@ class Remote:
                 await helper_runner
 
     async def notif(
-        self, meth: str, params: Union[dict, list] = None, nohandle: bool = False, quiet: bool = False,
+        self,
+        meth: str,
+        params: Union[dict, list, tuple] = None,
+        nohandle: bool = False,
+        quiet: bool = False,
     ) -> None:
         """Assemble and send a JSON-RPC Notification with the given data."""
         if not self.open:
@@ -498,7 +502,7 @@ class Remote:
             self.total_sent["notif"] += 1
             if isinstance(params, dict):
                 await self.send(make_notif(meth, **params))
-            elif isinstance(params, list):
+            elif isinstance(params, (list, tuple)):
                 await self.send(make_notif(meth, *params))
             else:
                 await self.send(make_notif(meth))
@@ -510,7 +514,7 @@ class Remote:
     async def request(
         self,
         meth: str,
-        params: Union[dict, list] = None,
+        params: Union[dict, list, tuple] = None,
         *,
         callback: Callable = None,
         nohandle: bool = False,
@@ -533,7 +537,7 @@ class Remote:
 
         if isinstance(params, dict):
             data, mid = make_request(meth, **params)
-        elif isinstance(params, list):
+        elif isinstance(params, (list, tuple)):
             data, mid = make_request(meth, *params)
         else:
             data, mid = make_request(meth)
@@ -560,7 +564,7 @@ class Remote:
     async def request_wait(
         self,
         meth: str,
-        params: Union[dict, list] = None,
+        params: Union[dict, list, tuple] = None,
         default: Any = None,
         *,
         callback: Callable = None,
@@ -601,7 +605,7 @@ class Remote:
         method: str = None,
         *,
         err: ErrorRPC = None,
-        res: Union[dict, list] = None,
+        res: Union[dict, list, tuple] = None,
         nohandle: bool = False,
     ) -> None:
         if self.open:

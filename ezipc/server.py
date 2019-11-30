@@ -221,7 +221,7 @@ class Server:
         return func
 
     async def bcast_notif(
-        self, meth: str, params: Union[dict, list] = None, **kw,
+        self, meth: str, params: Union[dict, list, tuple] = None, **kw,
     ) -> Dict[Remote, Task]:
         """Send a Notification to every connected Remote. Return a Dict which
             maps each Remote to its respective sending Task. These Tasks must
@@ -243,7 +243,7 @@ class Server:
         }
 
     async def bcast_request(
-        self, meth: str, params: Union[dict, list] = None, **kw,
+        self, meth: str, params: Union[dict, list, tuple] = None, **kw,
     ) -> Dict[Remote, Future]:
         """Send a Request to every connected Remote. Return a Dict which maps
             each Remote to the Future (or Exception) returned from the
