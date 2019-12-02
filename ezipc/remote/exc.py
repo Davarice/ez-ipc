@@ -47,4 +47,4 @@ class RemoteError(EZError):
         # return "Error {}: {}: {} (ID: {})".format(
         #     self.code, self.message, repr(self.data), self.id
         # )
-        return f"Error {self.code!r}: {self.message}"
+        return f"{self.code}: {self.message}"
