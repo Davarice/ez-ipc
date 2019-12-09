@@ -115,13 +115,13 @@ def echo(etype: str, text: Union[str, List[str]] = None, color=""):
 
 def err(text: str, exc: BaseException = None):
     if exc is not None:
-        text += f" {type(exc).__name__!r}: {exc}"
+        text += f" {type(exc).__name__}: {exc}"
     echo("err", text, T.red)
 
 
 def warn(text: str, exc: BaseException = None):
     if exc is not None:
-        text += f" {type(exc).__name__!r}: {exc}"
+        text += f" {type(exc).__name__}: {exc}"
     echo("warn", text, T.bright_yellow)
 
 

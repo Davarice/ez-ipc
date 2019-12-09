@@ -9,6 +9,7 @@ from asyncio import (
 )
 from datetime import datetime as dt
 from functools import partial, wraps
+from inspect import signature
 from typing import Callable, Optional, overload, Union
 
 from .remote import (
@@ -131,7 +132,7 @@ class Client:
             @wraps(func)
             async def handler(data: dict, _conn: Remote):
                 try:
-                    await func(data.get("params", None))
+                    await func(data.get("params", []))
                 except Exception as e:
                     err(f"Notification raised Exception:", e)
 
@@ -155,10 +156,15 @@ class Client:
             return partial(self.hook_request, method)
         else:
             # Function provided. Hook it directly.
+            params = len(signature(func).parameters)
+
             @wraps(func)
             async def handler(data: dict, conn: Remote):
                 try:
-                    res = await func(data.get("params", None))
+                    if params == 1:
+                        res = await func(data.get("params", []))
+                    else:
+                        res = await func(data.get("params", []), conn)
                 except Exception as e:
                     await conn.respond(
                         data.get("id", "0"),

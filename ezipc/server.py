@@ -155,7 +155,7 @@ class Server:
             @wraps(func)
             async def handler(data: dict, _conn: Remote):
                 try:
-                    await func(data.get("params", None))
+                    await func(data.get("params", []))
                 except Exception as e:
                     err(f"Notification raised Exception:", e)
 
@@ -185,9 +185,9 @@ class Server:
             async def handler(data: dict, conn: Remote):
                 try:
                     if params == 1:
-                        res = await func(data.get("params", None))
+                        res = await func(data.get("params", []))
                     else:
-                        res = await func(data.get("params", None), conn)
+                        res = await func(data.get("params", []), conn)
                 except Exception as e:
                     await conn.respond(
                         data.get("id", "0"),
