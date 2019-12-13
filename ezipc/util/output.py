@@ -37,17 +37,14 @@ def newLogger(name: str = ""):
 
 colors: Dict[str, Tuple[Callable[[str], str], str, int]] = {
     "": (T.white, "", 1),
-
     "con": (T.bold_cyan, " ++", 1),
     "dcon": (T.bold_red, "X- ", 1),
     "win": (T.bold_green, "\o/", 1),
     "err": (T.bold_magenta, "x!x", 1),
-
     "diff": (T.white, "*- ", 2),
     "tab": (T.white, "   ", 2),
     "warn": (T.bold_yellow, "<!>", 2),
     "info": (T.cyan, "(!)", 2),
-
     "recv": (T.white, "-->", 3),
     "send": (T.bold_black, "<--", 3),
     "cast": (T.bold_white, "#=-", 3),
@@ -64,6 +61,13 @@ res_good = T.green
 
 
 class _Printer:
+    __slots__ = (
+        "file",
+        "output_line",
+        "startup",
+        "verbosity",
+    )
+
     def __init__(self, verbosity: int = 2):
         self.file = None
         self.output_line = print

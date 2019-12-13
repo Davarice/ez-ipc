@@ -19,6 +19,7 @@ from asyncio import (
 from collections import Counter
 from datetime import datetime as dt
 from functools import partial
+from itertools import chain
 from json import JSONDecodeError, loads
 from typing import Any, Callable, Dict, List, overload, TypeVar, Union
 from uuid import uuid4
@@ -189,8 +190,8 @@ class Remote:
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
-            remote_pub, remote_ver = (
-                await self.request_wait("RSA.EXCH", self.connection.keys, [None, None])
+            remote_pub, remote_ver = await self.request_wait(
+                "RSA.EXCH", self.connection.keys, [None, None]
             )
 
             if remote_pub and remote_ver:
@@ -207,28 +208,11 @@ class Remote:
                 # Something went wrong. Do NOT switch to encryption.
                 return False
 
-    async def get_line(self) -> str:
-        line: str = await self.connection.read()
-        if line == b"":
-            raise ConnectionResetError("Stream closed by remote host.")
-        else:
-            return line
-
-    async def process_line(self, line: str, tasks: List[Task]) -> None:
-        """A line of data has been received. If it is a Response, get the Future
+    async def process_message(self, data: dict, tasks: List[Task]) -> None:
+        """A set of data has been received. If it is a Response, get the Future
         waiting for it and set its Result. Otherwise, find a Hook waiting for
         the Method received, and run it.
         """
-        try:
-            data = loads(line)
-        except JSONDecodeError as e:
-            warn(f"Invalid JSON received from {self!r}.")
-            await self.respond("0", err=Errors.parse_error(str(e)))
-            return
-        except UnicodeDecodeError:
-            warn(f"Corrupt data received from {self!r}.")
-            return
-
         method = data.get("method")
         mid = data.get("id")
         mtype = JRPC.check(data)
@@ -387,17 +371,35 @@ class Remote:
                 all the Tasks, if any, that have since accrued.
             """
             while line := await self.lines.get():
-                tasks: List[Task] = []
-
                 try:
-                    await self.process_line(line, tasks)
-                    await gather(*tasks)
-                except ConnectionError as e:
-                    # Whatever just happened was too much to just die calmly. Close
-                    #   down the entire Remote.
-                    if self.open:
-                        self.close()
-                        echo("dcon", f"Connection with {self} closed: {e}")
+                    data = loads(line)
+
+                except JSONDecodeError as e:
+                    warn(f"Invalid JSON received from {self!r}.")
+                    await self.respond("0", err=Errors.parse_error(str(e)))
+                except UnicodeDecodeError:
+                    warn(f"Corrupt data received from {self!r}.")
+
+                ## TODO: Does this catch still matter?
+                # except ConnectionError as e:
+                #     # Whatever just happened was too much to just die calmly. Close
+                #     #   down the entire Remote.
+                #     if self.open:
+                #         self.close()
+                #         echo("dcon", f"Connection with {self} closed: {e}")
+
+                else:
+                    if isinstance(data, dict):
+                        data = [data]
+
+                    tasks: List[List[Task]] = [[] for _ in data]
+
+                    await gather(
+                        *(map(self.process_message, data, tasks)),
+                        return_exceptions=True,
+                    )
+                    await gather(*chain(*tasks), return_exceptions=True)
+
                 finally:
                     self.lines.task_done()
 
@@ -433,8 +435,9 @@ class Remote:
         finally:
             # Kill Tasks.
             g = gather(*helpers)
-            g.cancel()
-            await g
+
+            if g.cancel():
+                await g
 
     async def loop(self, helper_count: int = 5) -> None:
         """Listen on the Connection, and write data from it into the Queue to be

@@ -6,7 +6,7 @@ https://www.jsonrpc.org/specification
 
 from enum import IntEnum
 from json import dumps
-from typing import Any, FrozenSet, overload, Tuple, TypedDict, Union
+from typing import Any, Dict, FrozenSet, List, overload, Tuple, TypedDict, Union
 from uuid import uuid4
 
 
@@ -31,9 +31,23 @@ res_sup: FrozenSet[str] = id_ | res_sub
 
 
 ErrorRPC = TypedDict("ErrorRPC", dict(code=int, message=str, data=Any))
+ParamsRPC = Union[Dict[str, Any], List[Any]]
+
+NotifRPC = TypedDict("NotifRPC", dict(jsonrpc=str, method=str, params=ParamsRPC))
+RequestRPC = TypedDict(
+    "RequestRPC", dict(jsonrpc=str, method=str, params=ParamsRPC, id=str)
+)
+ResponseRPC = TypedDict(
+    "ResponseRPC", dict(jsonrpc=str, result=ParamsRPC, error=ErrorRPC, id=str),
+)
 
 
-def _make(meth: str, *args, **kwargs) -> dict:
+# Notification  ::  <jsonrpc>, <method>, [<params>]
+# Request       ::  <jsonrpc>, <method>, [<params>], <id>
+# Response      ::  <jsonrpc>, <<result>XOR<error>>, <id>
+
+
+def _make(meth: str, *args, **kwargs) -> NotifRPC:
     if args and kwargs:
         raise ValueError("JSONRPC request must be either positional OR keywords.")
     elif args:
