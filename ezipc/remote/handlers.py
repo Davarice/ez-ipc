@@ -3,7 +3,7 @@ from functools import wraps
 from os import strerror
 from typing import Callable, Coroutine, Tuple, TYPE_CHECKING, TypeVar, Union
 
-from .protocol import Errors
+from .protocol import Error
 from ..util import err
 
 if TYPE_CHECKING:
@@ -100,7 +100,7 @@ def request_handler(host: Remote, method: str) -> Callable:
                         await remote.respond(
                             data["id"],
                             data.get("method", method),
-                            err=Errors.new(
+                            err=Error(
                                 -32001,
                                 "Server error",
                                 [
@@ -131,7 +131,7 @@ def request_handler(host: Remote, method: str) -> Callable:
                         await remote.respond(
                             data["id"],
                             data.get("method", method),
-                            err=Errors.new(code, message, errdat),
+                            err=Error(code, message, errdat),
                         )
                     else:
                         # No error. Send a Result Response.
@@ -155,7 +155,7 @@ def request_handler(host: Remote, method: str) -> Callable:
                     await remote.respond(
                         data["id"],
                         data.get("method", method),
-                        err=Errors.new(121, type(e).__name__, [str(e)]),
+                        err=Error(121, type(e).__name__, [str(e)]),
                     )
 
         host.hooks_request[method] = handle_request

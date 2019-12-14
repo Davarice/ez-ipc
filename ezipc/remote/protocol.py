@@ -85,46 +85,62 @@ def check_version(v: str) -> bool:
     return v == __version__
 
 
-class Errors:
+class Error(object):
     """Constructor for custom Error objects and shortcuts for pre-defined
         errors, as listed in section 5.1 of the JSON-RPC specification.
     """
 
-    __slots__ = ()
+    __slots__ = (
+        "code",
+        "data",
+        "message",
+    )
 
-    @staticmethod
-    def new(code: int, message: str, data=None) -> ErrorRPC:
-        """Make an Error, to be sent in a Response to a failed Request.
+    def __init__(self, code: int, message: str, data: Any = None):
+        self.code: int = code
+        self.message: str = message
+        self.data: Any = data
+
+    @classmethod
+    def parse_error(cls, data=None) -> "Error":
+        return cls(-32700, "Parse error", data)
+
+    @classmethod
+    def invalid_request(cls, data=None) -> "Error":
+        return cls(-32600, "Invalid Request", data)
+
+    @classmethod
+    def method_not_found(cls, data=None) -> "Error":
+        return cls(-32601, "Method not found", data)
+
+    @classmethod
+    def invalid_params(cls, data=None) -> "Error":
+        return cls(-32602, "Invalid params", data)
+
+    @classmethod
+    def server_error(cls, data=None) -> "Error":
+        return cls(-32603, "Internal error", data)
+
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        """Make this Error into a Dict, to be sent as part of a Response to a
+            failed Request.
 
         Contains:
             "code" (int): The identifier of the error type.
             "message" (str): Short description of the error.
-            ["data"] (any): A value containing further information.
+            ["data"] (Any): A value containing further information.
         """
-        err = {"code": code, "message": message}
-        if data is not None:
-            err["data"] = data
-        return err
+        yield "code", self.code
+        yield "message", self.message
 
-    @classmethod
-    def parse_error(cls, data=None) -> ErrorRPC:
-        return cls.new(-32700, "Parse error", data)
+        if self.data is not None:
+            yield "data", self.data
 
-    @classmethod
-    def invalid_request(cls, data=None) -> ErrorRPC:
-        return cls.new(-32600, "Invalid Request", data)
+    def __repr__(self) -> str:
+        return repr(dict(self))
 
-    @classmethod
-    def method_not_found(cls, data=None) -> ErrorRPC:
-        return cls.new(-32601, "Method not found", data)
-
-    @classmethod
-    def invalid_params(cls, data=None) -> ErrorRPC:
-        return cls.new(-32602, "Invalid params", data)
-
-    @classmethod
-    def server_error(cls, data=None) -> ErrorRPC:
-        return cls.new(-32603, "Internal error", data)
+    def __str__(self) -> str:
+        return dumps(dict(self), **JSON_OPTS)
 
 
 @overload
@@ -181,12 +197,12 @@ def make_response(mid: str, *, res: Union[dict, list, tuple] = None) -> str:
 
 
 @overload
-def make_response(mid: str, *, err: ErrorRPC = None) -> str:
+def make_response(mid: str, *, err: Error = None) -> str:
     ...
 
 
 def make_response(
-    mid: str, *, res: Union[dict, list, tuple] = None, err: ErrorRPC = None
+    mid: str, *, res: Union[dict, list, tuple] = None, err: Error = None
 ) -> str:
     """Make a Response, to be sent in reply to a Request.
 
@@ -202,6 +218,8 @@ def make_response(
     if res and err:
         raise ValueError("Response must not contain both Result and Error.")
     elif err:
+        err = dict(err)
+
         if err_sub <= set(err.keys()) <= err_sup:
             resp["error"] = err
         else:
@@ -287,6 +305,7 @@ class Notification(Message):
         self.method: Final[str] = method
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        # TODO
         ...
 
 
@@ -329,18 +348,17 @@ class Request(Message):
         ...
 
     @overload
-    def response(self, *, error: ErrorRPC) -> "Response":
+    def response(self, *, error: Error) -> "Response":
         ...
 
-    def response(
-        self, *, error: ErrorRPC = None, result: ParamsRPC = None
-    ) -> "Response":
+    def response(self, *, error: Error = None, result: ParamsRPC = None) -> "Response":
         # noinspection PyArgumentList
         return Response(self, error=error, result=result)
         # This is, normally, NOT A VALID CALL. However, we expect only one of
         #   these Keywords anyway, so if this raises an Exception, it should.
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        # TODO
         ...
 
 
@@ -360,15 +378,15 @@ class Response(Message):
         ...
 
     @overload
-    def __init__(self, request: Request, *, error: ErrorRPC):
+    def __init__(self, request: Request, *, error: Error):
         ...
 
     def __init__(
-        self, request: Request, *, error: ErrorRPC = None, result: ParamsRPC = None
+        self, request: Request, *, error: Error = None, result: ParamsRPC = None
     ):
         self.request: Final[Request] = request
 
-        self.error: Optional[ErrorRPC] = None
+        self.error: Optional[Error] = None
         self.result: Optional[ParamsRPC] = None
 
         if error or result:
@@ -387,10 +405,10 @@ class Response(Message):
         ...
 
     @overload
-    def set(self, *, error: ErrorRPC) -> None:
+    def set(self, *, error: Error) -> None:
         ...
 
-    def set(self, *, error: ErrorRPC = None, result: ParamsRPC = None) -> None:
+    def set(self, *, error: Error = None, result: ParamsRPC = None) -> None:
         if (error is None) is (result is None):
             # Method has been supplied both OR neither of the Arguments. This is
             #   an invalid call.
@@ -400,14 +418,15 @@ class Response(Message):
             self.result = result
 
     def __bool__(self) -> Optional[bool]:
-        if self.result:
+        if self.result is not None:
             return True
-        elif self.error:
+        elif self.error is not None:
             return False
         else:
             return None
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        # TODO
         ...
 
 

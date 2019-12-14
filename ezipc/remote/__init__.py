@@ -38,8 +38,7 @@ from .connection import can_encrypt, Connection
 from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
 from .protocol import (
-    ErrorRPC,
-    Errors,
+    Error,
     JRPC,
     make_notif,
     make_request,
@@ -262,7 +261,7 @@ class Remote:
             else:
                 # We have no hook for this method; Return an Error.
                 warn(f"Receiving invalid {method} Request from {self!r}.")
-                await self.respond(mid, err=Errors.method_not_found(method))
+                await self.respond(mid, err=Error.method_not_found(method))
 
         elif mtype is JRPC.NOTIF:
             # Message is a NOTIFICATION.
@@ -284,14 +283,14 @@ class Remote:
             else:
                 # We have no hook for this method; Return an Error.
                 warn(f"Receiving invalid {method} Notification from {self!r}.")
-                await self.respond(mid, err=Errors.method_not_found(method))
+                await self.respond(mid, err=Error.method_not_found(method))
 
         else:
             # Message is not a valid JSON-RPC structure. If we can find an ID,
             #   send a Response containing an Error and a frowny face.
             err_(f"Received an invalid Message from {self}.")
             if mid:
-                await self.respond(mid, err=Errors.invalid_request(list(data.keys())))
+                await self.respond(mid, err=Error.invalid_request(list(data.keys())))
 
     def handle_request(self, method: str) -> Callable:
         return request_handler(self, method)
@@ -376,7 +375,7 @@ class Remote:
 
                 except JSONDecodeError as e:
                     warn(f"Invalid JSON received from {self!r}.")
-                    await self.respond("0", err=Errors.parse_error(str(e)))
+                    await self.respond("0", err=Error.parse_error(str(e)))
                 except UnicodeDecodeError:
                     warn(f"Corrupt data received from {self!r}.")
 
@@ -607,7 +606,7 @@ class Remote:
         mid: str,
         method: str = None,
         *,
-        err: ErrorRPC = None,
+        err: Error = None,
         res: Union[dict, list, tuple] = None,
         nohandle: bool = False,
     ) -> None:
