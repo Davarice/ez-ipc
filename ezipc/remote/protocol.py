@@ -6,7 +6,7 @@ https://www.jsonrpc.org/specification
 
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from json import dumps
+from json import dumps, loads
 from typing import (
     Any,
     Dict,
@@ -236,32 +236,6 @@ def make_response(
     return dumps(resp, **JSON_OPTS)
 
 
-class JRPC(IntEnum):
-    NONE = 0
-    NOTIF = 1
-    REQUEST = 2
-    RESPONSE = 3
-
-    @classmethod
-    def check(cls, data: dict) -> "JRPC":
-        if data.get("jsonrpc") != __version__:
-            return cls.NONE
-        keys = frozenset(data.keys())
-
-        if id_ < keys:
-            # Either a Request or a Response.
-            if req_sub <= keys <= req_sup:
-                return cls.REQUEST
-            elif res_sub & keys and keys <= res_sup:
-                return cls.RESPONSE
-
-        elif method_ <= keys <= notif_sup:
-            # A Notification.
-            return cls.NOTIF
-
-        return cls.NONE
-
-
 class Message(ABC):
     jsonrpc = __version__
 
@@ -324,7 +298,8 @@ class Request(Message):
     def __init__(self, method: str, **kwargs):
         ...
 
-    def __init__(self, method: str, *args, **kwargs):
+    # noinspection PyShadowingBuiltins
+    def __init__(self, method: str, *args, id: str = None, **kwargs):
         if args and kwargs:
             raise ValueError(
                 "JSONRPC Request cannot mix Positional and Keyword Arguments."
@@ -337,7 +312,7 @@ class Request(Message):
             self.params: ParamsRPC = []
 
         self.method: Final[str] = method
-        self.id: Final[str] = _id_new()
+        self.id: Final[str] = id or _id_new()
 
     @overload
     def response(self) -> "Response":
@@ -365,26 +340,30 @@ class Request(Message):
 class Response(Message):
     __slots__ = (
         "error",
-        "request",
+        "id",
         "result",
     )
 
     @overload
-    def __init__(self, request: Request):
+    def __init__(self, request: Union[Request, str]):
         ...
 
     @overload
-    def __init__(self, request: Request, *, result: ParamsRPC):
+    def __init__(self, request: Union[Request, str], *, result: ParamsRPC):
         ...
 
     @overload
-    def __init__(self, request: Request, *, error: Error):
+    def __init__(self, request: Union[Request, str], *, error: Error):
         ...
 
     def __init__(
-        self, request: Request, *, error: Error = None, result: ParamsRPC = None
+        self,
+        request: Union[Request, str],
+        *,
+        error: Error = None,
+        result: ParamsRPC = None
     ):
-        self.request: Final[Request] = request
+        self.id: Final[str] = request.id if isinstance(request, Request) else request
 
         self.error: Optional[Error] = None
         self.result: Optional[ParamsRPC] = None
@@ -395,10 +374,6 @@ class Response(Message):
             # This is, normally, NOT A VALID CALL. However, we expect only one
             #   of these Keywords anyway, so if this raises an Exception, it
             #   should.
-
-    @property
-    def id(self) -> str:
-        return self.request.id
 
     @overload
     def set(self, *, result: ParamsRPC) -> None:
@@ -436,3 +411,65 @@ class Batch(List[Union[Notification, Request]]):
 
     def responses(self) -> Iterator[Response]:
         return (req.response() for req in self if isinstance(req, Request))
+
+
+class JRPC(IntEnum):
+    NONE = 0
+    NOTIF = 1
+    REQUEST = 2
+    RESPONSE = 3
+
+    @classmethod
+    def check(cls, data: dict) -> "JRPC":
+        if data.get("jsonrpc") != __version__:
+            return cls.NONE
+        keys = frozenset(data.keys())
+
+        if id_ < keys:
+            # Either a Request or a Response.
+            if req_sub <= keys <= req_sup:
+                return cls.REQUEST
+            elif res_sub & keys and keys <= res_sup:
+                return cls.RESPONSE
+
+        elif method_ <= keys <= notif_sup:
+            # A Notification.
+            return cls.NOTIF
+
+        return cls.NONE
+
+    @classmethod
+    def decode(cls, line: str) -> Iterator[Message]:
+        structure = loads(line)
+
+        if isinstance(structure, dict):
+            structure = [structure]
+
+        for msg in structure:
+            mtype = cls.check(msg)
+
+            if mtype is cls.NOTIF:
+                params = msg.get("params")
+
+                if isinstance(params, dict):
+                    yield Notification(msg["method"], **params)
+                elif isinstance(params, list):
+                    yield Notification(msg["method"], *params)
+                else:
+                    yield Notification(msg["method"])
+
+            elif mtype is cls.REQUEST:
+                params = msg.get("params")
+
+                if isinstance(params, dict):
+                    yield Request(msg["method"], **params)
+                elif isinstance(params, list):
+                    yield Request(msg["method"], *params)
+                else:
+                    yield Request(msg["method"])
+
+            elif mtype is cls.RESPONSE:
+                # noinspection PyArgumentList
+                yield Response(
+                    msg["id"], error=msg.get("error"), result=msg.get("result")
+                )
