@@ -4,9 +4,22 @@ A (loose) implementation of the JSON-RPC 2.0 protocol.
 https://www.jsonrpc.org/specification
 """
 
+from abc import ABC, abstractmethod
 from enum import IntEnum
 from json import dumps
-from typing import Any, Dict, FrozenSet, List, overload, Tuple, TypedDict, Union
+from typing import (
+    Any,
+    Dict,
+    Final,
+    FrozenSet,
+    Iterator,
+    List,
+    Optional,
+    overload,
+    Tuple,
+    TypedDict,
+    Union,
+)
 from uuid import uuid4
 
 
@@ -229,3 +242,178 @@ class JRPC(IntEnum):
             return cls.NOTIF
 
         return cls.NONE
+
+
+class Message(ABC):
+    jsonrpc = __version__
+
+    @abstractmethod
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        raise NotImplementedError
+
+    def __repr__(self) -> str:
+        return repr(dict(self))
+
+    def __str__(self) -> str:
+        return dumps(dict(self), **JSON_OPTS)
+
+
+class Notification(Message):
+    __slots__ = (
+        "method",
+        "params",
+    )
+
+    @overload
+    def __init__(self, method: str, *args):
+        ...
+
+    @overload
+    def __init__(self, method: str, **kwargs):
+        ...
+
+    def __init__(self, method: str, *args, **kwargs):
+        if args and kwargs:
+            raise ValueError(
+                "JSONRPC Notification cannot mix Positional and Keyword Arguments."
+            )
+        elif args:
+            self.params: ParamsRPC = list(args)
+        elif kwargs:
+            self.params: ParamsRPC = kwargs
+        else:
+            self.params: ParamsRPC = []
+
+        self.method: Final[str] = method
+
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        ...
+
+
+class Request(Message):
+    __slots__ = (
+        "id",
+        "method",
+        "params",
+    )
+
+    @overload
+    def __init__(self, method: str, *args):
+        ...
+
+    @overload
+    def __init__(self, method: str, **kwargs):
+        ...
+
+    def __init__(self, method: str, *args, **kwargs):
+        if args and kwargs:
+            raise ValueError(
+                "JSONRPC Request cannot mix Positional and Keyword Arguments."
+            )
+        elif args:
+            self.params: ParamsRPC = list(args)
+        elif kwargs:
+            self.params: ParamsRPC = kwargs
+        else:
+            self.params: ParamsRPC = []
+
+        self.method: Final[str] = method
+        self.id: Final[str] = _id_new()
+
+    @overload
+    def response(self) -> "Response":
+        ...
+
+    @overload
+    def response(self, *, result: ParamsRPC) -> "Response":
+        ...
+
+    @overload
+    def response(self, *, error: ErrorRPC) -> "Response":
+        ...
+
+    def response(
+        self, *, error: ErrorRPC = None, result: ParamsRPC = None
+    ) -> "Response":
+        # noinspection PyArgumentList
+        return Response(self, error=error, result=result)
+        # This is, normally, NOT A VALID CALL. However, we expect only one of
+        #   these Keywords anyway, so if this raises an Exception, it should.
+
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        ...
+
+
+class Response(Message):
+    __slots__ = (
+        "error",
+        "request",
+        "result",
+    )
+
+    @overload
+    def __init__(self, request: Request):
+        ...
+
+    @overload
+    def __init__(self, request: Request, *, result: ParamsRPC):
+        ...
+
+    @overload
+    def __init__(self, request: Request, *, error: ErrorRPC):
+        ...
+
+    def __init__(
+        self, request: Request, *, error: ErrorRPC = None, result: ParamsRPC = None
+    ):
+        self.request: Final[Request] = request
+
+        self.error: Optional[ErrorRPC] = None
+        self.result: Optional[ParamsRPC] = None
+
+        if error or result:
+            # noinspection PyArgumentList
+            self.set(error=error, result=result)
+            # This is, normally, NOT A VALID CALL. However, we expect only one
+            #   of these Keywords anyway, so if this raises an Exception, it
+            #   should.
+
+    @property
+    def id(self) -> str:
+        return self.request.id
+
+    @overload
+    def set(self, *, result: ParamsRPC) -> None:
+        ...
+
+    @overload
+    def set(self, *, error: ErrorRPC) -> None:
+        ...
+
+    def set(self, *, error: ErrorRPC = None, result: ParamsRPC = None) -> None:
+        if (error is None) is (result is None):
+            # Method has been supplied both OR neither of the Arguments. This is
+            #   an invalid call.
+            raise ValueError("Response must be provided either an Error OR a Result.")
+        else:
+            self.error = error
+            self.result = result
+
+    def __bool__(self) -> Optional[bool]:
+        if self.result:
+            return True
+        elif self.error:
+            return False
+        else:
+            return None
+
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        ...
+
+
+class Batch(List[Union[Notification, Request]]):
+    def __init__(self, *a):
+        super().__init__(a)
+
+    def responses(self) -> Iterator[Response]:
+        return (req.response() for req in self if isinstance(req, Request))
