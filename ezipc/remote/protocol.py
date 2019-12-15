@@ -7,7 +7,7 @@ https://www.jsonrpc.org/specification
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from json import dumps, loads
-from secrets import token_hex
+from secrets import randbits
 from typing import (
     Any,
     Dict,
@@ -20,9 +20,9 @@ from typing import (
     Tuple,
     Union,
 )
-# from uuid import uuid4
 
 
+ID_PRE: str = "NaN"
 JSON_OPTS = {"separators": (",", ":")}
 __version__ = "2.0"
 
@@ -43,7 +43,7 @@ res_sub: FrozenSet[str] = frozenset({"error", "result"})
 res_sup: FrozenSet[str] = id_ | res_sub
 
 
-ID: type = str
+ID: type = Optional[Union[int, str]]
 ParamsRPC: type = Union[Dict[str, Any], List[Any]]
 
 
@@ -53,7 +53,7 @@ ParamsRPC: type = Union[Dict[str, Any], List[Any]]
 
 
 def _id_new() -> ID:
-    return token_hex(4)
+    return f"{ID_PRE}/{randbits(24):0>6X}"
     # return uuid4().hex
 
 
@@ -115,8 +115,71 @@ class Error(object):
         return dumps(dict(self), **JSON_OPTS)
 
 
+class JRPC(IntEnum):
+    NONE = 0
+    NOTIF = 1
+    REQUEST = 2
+    RESPONSE = 3
+
+    @classmethod
+    def check(cls, data: dict) -> "JRPC":
+        if data.get("jsonrpc") != __version__:
+            return cls.NONE
+        keys = frozenset(data.keys())
+
+        if id_ < keys:
+            # Either a Request or a Response.
+            if req_sub <= keys <= req_sup:
+                return cls.REQUEST
+            elif res_sub & keys and keys <= res_sup:
+                return cls.RESPONSE
+
+        elif method_ <= keys <= notif_sup:
+            # A Notification.
+            return cls.NOTIF
+
+        return cls.NONE
+
+    @classmethod
+    def decode(cls, line: str) -> Iterator["Message"]:
+        structure = loads(line)
+
+        if isinstance(structure, dict):
+            structure = [structure]
+
+        for msg in structure:
+            mtype = cls.check(msg)
+
+            if mtype is cls.NOTIF:
+                params = msg.get("params")
+
+                if isinstance(params, dict):
+                    yield Notification(msg["method"], **params)
+                elif isinstance(params, list):
+                    yield Notification(msg["method"], *params)
+                else:
+                    yield Notification(msg["method"])
+
+            elif mtype is cls.REQUEST:
+                params = msg.get("params")
+
+                if isinstance(params, dict):
+                    yield Request(msg["method"], **params)
+                elif isinstance(params, list):
+                    yield Request(msg["method"], *params)
+                else:
+                    yield Request(msg["method"])
+
+            elif mtype is cls.RESPONSE:
+                # noinspection PyArgumentList
+                yield Response(
+                    msg["id"], error=msg.get("error"), result=msg.get("result")
+                )
+
+
 class Message(ABC):
     jsonrpc = __version__
+    mtype: JRPC = JRPC.NONE
 
     @abstractmethod
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
@@ -134,6 +197,7 @@ class Notification(Message):
         "method",
         "params",
     )
+    mtype = JRPC.NOTIF
 
     @overload
     def __init__(self, method: str, *args):
@@ -169,17 +233,17 @@ class Request(Message):
         "method",
         "params",
     )
+    mtype = JRPC.REQUEST
 
     @overload
-    def __init__(self, method: str, *args):
+    def __init__(self, method: str, *args, mid: ID = None):
         ...
 
     @overload
-    def __init__(self, method: str, **kwargs):
+    def __init__(self, method: str, mid: ID = None, **kwargs):
         ...
 
-    # noinspection PyShadowingBuiltins
-    def __init__(self, method: str, *args, id: str = None, **kwargs):
+    def __init__(self, method: str, *args, mid: ID = None, **kwargs):
         if args and kwargs:
             raise ValueError(
                 "JSONRPC Request cannot mix Positional and Keyword Arguments."
@@ -192,7 +256,7 @@ class Request(Message):
             self.params: ParamsRPC = []
 
         self.method: Final[str] = method
-        self.id: Final[ID] = id or _id_new()
+        self.id: Final[ID] = mid or _id_new()
 
     @overload
     def response(self) -> "Response":
@@ -225,22 +289,23 @@ class Response(Message):
         "id",
         "result",
     )
+    mtype = JRPC.RESPONSE
 
     @overload
-    def __init__(self, request: Union[Request, str]):
+    def __init__(self, request: Union[Request, ID]):
         ...
 
     @overload
-    def __init__(self, request: Union[Request, str], *, result: ParamsRPC):
+    def __init__(self, request: Union[Request, ID], *, result: ParamsRPC):
         ...
 
     @overload
-    def __init__(self, request: Union[Request, str], *, error: Error):
+    def __init__(self, request: Union[Request, ID], *, error: Error):
         ...
 
     def __init__(
         self,
-        request: Union[Request, str],
+        request: Union[Request, ID],
         *,
         error: Error = None,
         result: ParamsRPC = None
@@ -299,65 +364,3 @@ class Batch(List[Union[Notification, Request]]):
 
     def responses(self) -> Iterator[Response]:
         return (req.response() for req in self if isinstance(req, Request))
-
-
-class JRPC(IntEnum):
-    NONE = 0
-    NOTIF = 1
-    REQUEST = 2
-    RESPONSE = 3
-
-    @classmethod
-    def check(cls, data: dict) -> "JRPC":
-        if data.get("jsonrpc") != __version__:
-            return cls.NONE
-        keys = frozenset(data.keys())
-
-        if id_ < keys:
-            # Either a Request or a Response.
-            if req_sub <= keys <= req_sup:
-                return cls.REQUEST
-            elif res_sub & keys and keys <= res_sup:
-                return cls.RESPONSE
-
-        elif method_ <= keys <= notif_sup:
-            # A Notification.
-            return cls.NOTIF
-
-        return cls.NONE
-
-    @classmethod
-    def decode(cls, line: str) -> Iterator[Message]:
-        structure = loads(line)
-
-        if isinstance(structure, dict):
-            structure = [structure]
-
-        for msg in structure:
-            mtype = cls.check(msg)
-
-            if mtype is cls.NOTIF:
-                params = msg.get("params")
-
-                if isinstance(params, dict):
-                    yield Notification(msg["method"], **params)
-                elif isinstance(params, list):
-                    yield Notification(msg["method"], *params)
-                else:
-                    yield Notification(msg["method"])
-
-            elif mtype is cls.REQUEST:
-                params = msg.get("params")
-
-                if isinstance(params, dict):
-                    yield Request(msg["method"], **params)
-                elif isinstance(params, list):
-                    yield Request(msg["method"], *params)
-                else:
-                    yield Request(msg["method"])
-
-            elif mtype is cls.RESPONSE:
-                # noinspection PyArgumentList
-                yield Response(
-                    msg["id"], error=msg.get("error"), result=msg.get("result")
-                )

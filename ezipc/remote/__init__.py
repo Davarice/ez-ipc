@@ -21,6 +21,7 @@ from datetime import datetime as dt
 from functools import partial
 from itertools import chain
 from json import JSONDecodeError, loads
+from secrets import randbits
 from typing import Any, Callable, Dict, List, overload, TypeVar, Union
 from uuid import uuid4
 
@@ -180,6 +181,9 @@ class Remote:
                 echo("win", "Connection Secured by RSA Key Exchange.")
             else:
                 return 1, "Cannot Activate"
+
+    def _id_new(self) -> str:
+        return f"{self.id}/{randbits(24):0>6X}"
 
     async def enable_rsa(self) -> bool:
         if not self.connection.can_encrypt:
@@ -539,11 +543,11 @@ class Remote:
         self.total_sent["request"] += 1
 
         if isinstance(params, dict):
-            req = Request(meth, **params)
+            req = Request(meth, **params, mid=self._id_new())
         elif isinstance(params, (list, tuple)):
-            req = Request(meth, *params)
+            req = Request(meth, *params, mid=self._id_new())
         else:
-            req = Request(meth)
+            req = Request(meth, mid=self._id_new())
 
         self.futures[req.id] = future
 
