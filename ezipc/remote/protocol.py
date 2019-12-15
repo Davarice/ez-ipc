@@ -21,6 +21,8 @@ from typing import (
     Union,
 )
 
+from .exc import RemoteError
+
 
 ID_PRE: str = "NaN"
 JSON_OPTS = {"separators": (",", ":")}
@@ -74,6 +76,10 @@ class Error(object):
         self.data: Any = data
 
     @classmethod
+    def from_exception(cls, e: Exception) -> "Error":
+        return cls(5, f"{type(e).__name__}: {str(e)}", e.args)
+
+    @classmethod
     def parse_error(cls, data=None) -> "Error":
         return cls(-32700, "Parse error", data)
 
@@ -92,6 +98,9 @@ class Error(object):
     @classmethod
     def server_error(cls, data=None) -> "Error":
         return cls(-32603, "Internal error", data)
+
+    def as_exception(self) -> RemoteError:
+        return RemoteError.from_message(dict(self))
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
         """Make this Error into a Dict, to be sent as part of a Response to a
@@ -164,11 +173,11 @@ class JRPC(IntEnum):
                 params = msg.get("params")
 
                 if isinstance(params, dict):
-                    yield Request(msg["method"], **params)
+                    yield Request(msg["method"], mid=msg["id"], **params)
                 elif isinstance(params, list):
-                    yield Request(msg["method"], *params)
+                    yield Request(msg["method"], *params, mid=msg["id"])
                 else:
-                    yield Request(msg["method"])
+                    yield Request(msg["method"], mid=msg["id"])
 
             elif mtype is cls.RESPONSE:
                 # noinspection PyArgumentList
@@ -351,16 +360,16 @@ class Response(Message):
         yield "jsonrpc", self.jsonrpc
 
         if self.error is not None:
-            yield "error", self.error
+            yield "error", dict(self.error)
         else:
             yield "result", self.result or []
 
         yield "id", self.id
 
 
-class Batch(List[Union[Notification, Request]]):
+class Batch(List[Message]):
     def __init__(self, *a):
         super().__init__(a)
 
-    def responses(self) -> Iterator[Response]:
-        return (req.response() for req in self if isinstance(req, Request))
+    def flat(self) -> List[Dict[str, Any]]:
+        return [dict(msg) for msg in self]

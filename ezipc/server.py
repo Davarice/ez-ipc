@@ -21,8 +21,11 @@ from typing import Callable, Dict, Optional, overload, Union
 from .remote import (
     can_encrypt,
     counter,
+    Error,
+    Notification,
     Remote,
     RemoteError,
+    Request,
     request_handler,
     rpc_response,
     TV,
@@ -153,9 +156,9 @@ class Server:
         else:
             # Function provided. Hook it directly.
             @wraps(func)
-            async def handler(data: dict, _conn: Remote):
+            async def handler(msg: Notification, _conn: Remote):
                 try:
-                    await func(data.get("params", []))
+                    await func(msg.params)
                 except Exception as e:
                     err(f"Notification raised Exception:", e)
 
@@ -182,26 +185,18 @@ class Server:
             params = len(signature(func).parameters)
 
             @wraps(func)
-            async def handler(data: dict, conn: Remote):
+            async def handler(msg: Request, conn: Remote):
                 try:
                     if params == 1:
-                        res = await func(data.get("params", []))
+                        res = await func(msg.params)
                     else:
-                        res = await func(data.get("params", []), conn)
+                        res = await func(msg.params, conn)
                 except Exception as e:
                     await conn.respond(
-                        data.get("id", "0"),
-                        data.get("method", "NONE"),
-                        err={
-                            "code": type(e).__name__,
-                            "message": str(e),
-                            "data": e.args,
-                        },
+                        msg.id, msg.method, err=Error.from_exception(e),
                     )
                 else:
-                    await conn.respond(
-                        data.get("id", "0"), data.get("method", "NONE"), res=res
-                    )
+                    await conn.respond(msg.id, msg.method, res=res)
 
             self.hooks_request[method] = handler
             return func

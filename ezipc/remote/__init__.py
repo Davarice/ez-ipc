@@ -19,10 +19,20 @@ from asyncio import (
 from collections import Counter
 from datetime import datetime as dt
 from functools import partial
-from itertools import chain
-from json import JSONDecodeError, loads
+from inspect import isawaitable
+from json import JSONDecodeError
 from secrets import randbits
-from typing import Any, Callable, Dict, List, overload, TypeVar, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    overload,
+    TypeVar,
+    Union,
+)
 from uuid import uuid4
 
 from ..util.output import (
@@ -39,6 +49,7 @@ from .connection import can_encrypt, Connection
 from .exc import RemoteError
 from .handlers import rpc_response, request_handler, response_handler
 from .protocol import (
+    Batch,
     Error,
     JRPC,
     Message,
@@ -153,12 +164,12 @@ class Remote:
             required for an RSA Key Exchange.
         """
 
-        @self.handle_request("PING")
-        def cb_ping(data: dict, _remote: Remote) -> rpc_response:
-            return data.get("params", [])
+        @self.hook_request("PING")
+        def cb_ping(msg: Request, _remote: Remote) -> rpc_response:
+            return msg.params
 
-        @self.handle_request("RSA.EXCH")
-        async def cb_rsa_exchange(data: dict, remote: Remote) -> rpc_response:
+        @self.hook_request("RSA.EXCH")
+        async def cb_rsa_exchange(msg: Request, remote: Remote):
             if remote.connection.can_encrypt:
                 echo(
                     "info",
@@ -167,20 +178,20 @@ class Remote:
                         "(The connection is not encrypted yet.)",
                     ],
                 )
-                remote.connection.add_keys(*data.get("params", [None, None]))
+                remote.connection.add_keys(*msg.params)
                 return remote.connection.keys
             else:
                 err_("Cannot establish a Secure Connection.")
-                return 92, "Encryption Unavailable"
+                return Error(92, "Encryption Unavailable")
 
-        @self.handle_request("RSA.CONF")
-        async def cb_rsa_confirm(data: dict, remote: Remote) -> rpc_response:
+        @self.hook_request("RSA.CONF")
+        async def cb_rsa_confirm(msg: Request, remote: Remote):
             if remote.connection.encryption_ready():
-                await remote.respond(data["id"], data["method"], res=[True])
+                await remote.respond(msg.id, msg.method, res=[True])
                 remote.connection.begin_encryption()
                 echo("win", "Connection Secured by RSA Key Exchange.")
             else:
-                return 1, "Cannot Activate"
+                return Error(1, "Cannot Activate")
 
     def _id_new(self) -> str:
         return f"{self.id}/{randbits(24):0>6X}"
@@ -212,96 +223,91 @@ class Remote:
                 # Something went wrong. Do NOT switch to encryption.
                 return False
 
-    async def process_message(self, data: dict, tasks: List[Task]) -> None:
+    def process_message(self, msg: Message) -> Optional[Response]:
         """A set of data has been received. If it is a Response, get the Future
         waiting for it and set its Result. Otherwise, find a Hook waiting for
         the Method received, and run it.
         """
-        method = data.get("method")
-        mid = data.get("id")
-        mtype = JRPC.check(data)
-
-        if mtype is JRPC.RESPONSE:
+        if isinstance(msg, Response):
             # Message is a RESPONSE.
             self.total_recv["response"] += 1
-            if mid in self.futures:
+            if msg.id in self.futures:
                 # Something is waiting for this message.
-                future: Future = self.futures.pop(mid)
+                future: Future = self.futures.pop(msg.id)
 
                 if future.cancelled():
                     warn(
                         f"Received a Response from {self!r} for a cancelled Future."
-                        f" UUID: {mid}"
+                        f" UUID: {msg.id}"
                     )
                 elif future.done():
                     warn(
                         f"Received a Response from {self!r} for a closed Future."
-                        f" UUID: {mid}"
+                        f" UUID: {msg.id}"
                     )
                 else:
                     # We need to fulfill this Future now.
                     echo("recv", f"Receiving a Response from {self}.")
 
-                    if "error" in data:
+                    if msg.error:
                         # Server sent an Error Response. Forward it to the Future.
-                        future.set_exception(RemoteError.from_message(data))
+                        future.set_exception(msg.error.as_exception())
                     else:
                         # Server sent a Result Response. Give it to the Future.
-                        future.set_result(data["result"])
+                        future.set_result(msg.result)
             else:
                 # Nothing is waiting for this message. Make a note and move on.
-                warn(f"Received an unsolicited Response for {self!r}. UUID: {mid}")
+                warn(f"Received an unsolicited Response for {self!r}. UUID: {msg.id}")
 
-        elif mtype is JRPC.REQUEST:
+        elif isinstance(msg, Request):
             # Message is a REQUEST.
             self.total_recv["request"] += 1
 
             hooks = self.hooks_request.copy()
             hooks.update(self.hooks_request_inher)
 
-            if method in hooks:
+            if msg.method in hooks:
                 # We know where to send this type of Request.
-                echo("recv", f"Receiving {hl_method(method)} Request from {self}.")
-                tasks.append(self.eventloop.create_task(hooks[method](data, self)))
+                echo("recv", f"Receiving {hl_method(msg.method)} Request from {self}.")
+                return hooks[msg.method](msg, self)
             else:
                 # We have no hook for this method; Return an Error.
-                warn(f"Receiving invalid {method} Request from {self!r}.")
-                await self.respond(mid, err=Error.method_not_found(method))
+                warn(f"Receiving invalid {msg.method} Request from {self!r}.")
+                return msg.response(error=Error.method_not_found(msg.method))
 
-        elif mtype is JRPC.NOTIF:
+        elif isinstance(msg, Notification):
             # Message is a NOTIFICATION.
             self.total_recv["notif"] += 1
 
             hooks = self.hooks_notif.copy()
             hooks.update(self.hooks_notif_inher)
 
-            if method == "TERM":
+            if msg.method == "TERM":
                 # The connection is being explicitly terminated.
                 echo("recv", f"Receiving TERMINATE from {self}.")
                 raise ConnectionResetError(
-                    data["params"]["reason"] or "Connection terminated by peer."
+                    msg.params["reason"] or "Connection terminated by peer."
                 )
-            elif method in hooks:
+            elif msg.method in hooks:
                 # We know where to send this type of Notification.
-                echo("recv", f"Receiving {hl_method(method)} Notification from {self}.")
-                tasks.append(self.eventloop.create_task(hooks[method](data, self)))
+                echo(
+                    "recv",
+                    f"Receiving {hl_method(msg.method)} Notification from {self}.",
+                )
+                return hooks[msg.method](msg, self)
             else:
                 # We have no hook for this method; Return an Error.
-                warn(f"Receiving invalid {method} Notification from {self!r}.")
-                await self.respond(mid, err=Error.method_not_found(method))
+                warn(f"Receiving invalid {msg.method} Notification from {self!r}.")
+                # return Response(msg, error=Error.method_not_found(msg.method))
 
-        else:
-            # Message is not a valid JSON-RPC structure. If we can find an ID,
-            #   send a Response containing an Error and a frowny face.
-            err_(f"Received an invalid Message from {self}.")
-            if mid:
-                await self.respond(mid, err=Error.invalid_request(list(data.keys())))
-
-    def handle_request(self, method: str) -> Callable:
-        return request_handler(self, method)
-
-    def handle_response(self, **kw) -> Callable:
-        return response_handler(self, **kw)
+        # else:
+        #     # Message is not a valid JSON-RPC structure. If we can find an ID,
+        #     #   send a Response containing an Error and a frowny face.
+        #     err_(f"Received an invalid Message from {self}.")
+        #     if msg.id:
+        #         return Response(
+        #             msg, error=Error.invalid_request(list(dict(msg).keys()))
+        #         )
 
     @overload
     def hook_notif(self, method: str) -> Callable[[TV], TV]:
@@ -376,11 +382,13 @@ class Remote:
             """
             while line := await self.lines.get():
                 try:
-                    data = loads(line)
+                    data = {
+                        msg: self.process_message(msg) for msg in (JRPC.decode(line))
+                    }
 
                 except JSONDecodeError as e:
                     warn(f"Invalid JSON received from {self!r}.")
-                    await self.respond("0", err=Error.parse_error(str(e)))
+                    await self.respond(None, err=Error.parse_error(str(e)))
                 except UnicodeDecodeError:
                     warn(f"Corrupt data received from {self!r}.")
 
@@ -393,16 +401,46 @@ class Remote:
                 #         echo("dcon", f"Connection with {self} closed: {e}")
 
                 else:
-                    if isinstance(data, dict):
-                        data = [data]
+                    responses: List[Response] = Batch()
+                    tasks: Dict[Message, Awaitable] = {}
 
-                    tasks: List[List[Task]] = [[] for _ in data]
+                    for recv, tsk in data.items():
+                        if isinstance(tsk, Response):
+                            responses.append(tsk)
+                        elif isawaitable(tsk):
+                            tasks[recv] = tsk
 
-                    await gather(
-                        *(map(self.process_message, data, tasks)),
-                        return_exceptions=True,
+                    finals = dict(
+                        zip(
+                            tasks.keys(),
+                            await gather(*tasks.values(), return_exceptions=True),
+                        )
                     )
-                    await gather(*chain(*tasks), return_exceptions=True)
+
+                    for recv, ret in finals.items():
+                        if isinstance(ret, Response):
+                            responses.append(ret)
+
+                        elif isinstance(ret, (dict, list, tuple)):
+                            if isinstance(recv, Request):
+                                responses.append(recv.response(result=ret))
+
+                        elif isinstance(ret, Exception):
+                            if isinstance(recv, Request):
+                                responses.append(
+                                    recv.response(error=Error.from_exception(ret))
+                                )
+
+                    # if isinstance(data, dict):
+                    #     data = [data]
+                    #
+                    # tasks: List[List[Task]] = [[] for _ in data]
+                    #
+                    # await gather(
+                    #     *(map(self.process_message, data, tasks)),
+                    #     return_exceptions=True,
+                    # )
+                    # await gather(*chain(*tasks), return_exceptions=True)
 
                 finally:
                     self.lines.task_done()
@@ -608,7 +646,7 @@ class Remote:
 
     async def respond(
         self,
-        mid: str,
+        mid: Optional[str],
         method: str = None,
         *,
         err: Error = None,
@@ -636,6 +674,7 @@ class Remote:
                     raise e
 
     async def send(self, msg: Message) -> None:
+        echo(str(msg))
         if self.open:
             await self.connection.write(str(msg))
 
