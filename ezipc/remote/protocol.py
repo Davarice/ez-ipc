@@ -7,6 +7,7 @@ https://www.jsonrpc.org/specification
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from json import dumps, loads
+from secrets import token_hex
 from typing import (
     Any,
     Dict,
@@ -17,10 +18,9 @@ from typing import (
     Optional,
     overload,
     Tuple,
-    TypedDict,
     Union,
 )
-from uuid import uuid4
+# from uuid import uuid4
 
 
 JSON_OPTS = {"separators": (",", ":")}
@@ -43,16 +43,8 @@ res_sub: FrozenSet[str] = frozenset({"error", "result"})
 res_sup: FrozenSet[str] = id_ | res_sub
 
 
-ErrorRPC = TypedDict("ErrorRPC", dict(code=int, message=str, data=Any))
-ParamsRPC = Union[Dict[str, Any], List[Any]]
-
-NotifRPC = TypedDict("NotifRPC", dict(jsonrpc=str, method=str, params=ParamsRPC))
-RequestRPC = TypedDict(
-    "RequestRPC", dict(jsonrpc=str, method=str, params=ParamsRPC, id=str)
-)
-ResponseRPC = TypedDict(
-    "ResponseRPC", dict(jsonrpc=str, result=ParamsRPC, error=ErrorRPC, id=str),
-)
+ID: type = str
+ParamsRPC: type = Union[Dict[str, Any], List[Any]]
 
 
 # Notification  ::  <jsonrpc>, <method>, [<params>]
@@ -60,29 +52,9 @@ ResponseRPC = TypedDict(
 # Response      ::  <jsonrpc>, <<result>XOR<error>>, <id>
 
 
-def _make(meth: str, *args, **kwargs) -> NotifRPC:
-    if args and kwargs:
-        raise ValueError("JSONRPC request must be either positional OR keywords.")
-    elif args:
-        params = list(args)
-    elif kwargs:
-        params = {**kwargs}
-    else:
-        params = None
-
-    return (
-        {"jsonrpc": __version__, "method": meth, "params": params}
-        if params is not None
-        else {"jsonrpc": __version__, "method": meth}
-    )
-
-
-def _id_new() -> str:
-    return uuid4().hex
-
-
-def check_version(v: str) -> bool:
-    return v == __version__
+def _id_new() -> ID:
+    return token_hex(4)
+    # return uuid4().hex
 
 
 class Error(object):
@@ -143,99 +115,6 @@ class Error(object):
         return dumps(dict(self), **JSON_OPTS)
 
 
-@overload
-def make_notif(meth: str, *args) -> str:
-    ...
-
-
-@overload
-def make_notif(meth: str, **kwargs) -> str:
-    ...
-
-
-def make_notif(meth: str, *args, **kwargs) -> str:
-    """Make a Notification, to be sent without expectation of a Response.
-
-    Contains:
-        "jsonrpc" (str): Protocol specifier, must be "2.0".
-        "method" (str): The name of the method to be invoked; Loosely, "why this
-            request is being made".
-        ["params"] (list, dict): The values to be used in the execution of the
-            method specified.
-    """
-    req = _make(meth, *args, **kwargs)
-
-    return dumps(req, **JSON_OPTS)
-
-
-@overload
-def make_request(meth: str, *args) -> Tuple[str, str]:
-    ...
-
-
-@overload
-def make_request(meth: str, **kwargs) -> Tuple[str, str]:
-    ...
-
-
-def make_request(meth: str, *args, **kwargs) -> Tuple[str, str]:
-    """Make a Request, a message that will yield a Response.
-
-    Contains ALL fields documented in `make_notif` above, PLUS:
-        "id": Newly-generated UUID of the Request, for replication in Response.
-    """
-    req = _make(meth, *args, **kwargs)
-    mid = _id_new()
-    req["id"] = mid
-
-    return dumps(req, **JSON_OPTS), mid
-
-
-@overload
-def make_response(mid: str, *, res: Union[dict, list, tuple] = None) -> str:
-    ...
-
-
-@overload
-def make_response(mid: str, *, err: Error = None) -> str:
-    ...
-
-
-def make_response(
-    mid: str, *, res: Union[dict, list, tuple] = None, err: Error = None
-) -> str:
-    """Make a Response, to be sent in reply to a Request.
-
-    Contains:
-        "jsonrpc" (str): Protocol specifier, must be "2.0".
-        Exactly ONE of:
-            "result" (dict or list): Whatever data should be sent back.
-            "error" (dict): A Dict built by `Errors.new()`, contains data about
-                what went wrong.
-        "id": The UUID of the Request that prompted this Response.
-    """
-    resp = {"jsonrpc": __version__}
-    if res and err:
-        raise ValueError("Response must not contain both Result and Error.")
-    elif err:
-        err = dict(err)
-
-        if err_sub <= set(err.keys()) <= err_sup:
-            resp["error"] = err
-        else:
-            raise ValueError(
-                "Error must have keys 'code', 'message', and, optionally, 'data'."
-            )
-    elif res is None:
-        resp["result"] = []
-        # raise ValueError("Response MUST be provided either a Result or an Error.")
-    else:
-        resp["result"] = res
-
-    resp["id"] = mid
-    return dumps(resp, **JSON_OPTS)
-
-
 class Message(ABC):
     jsonrpc = __version__
 
@@ -279,8 +158,9 @@ class Notification(Message):
         self.method: Final[str] = method
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
-        # TODO
-        ...
+        yield "jsonrpc", self.jsonrpc
+        yield "method", self.method
+        yield "params", self.params
 
 
 class Request(Message):
@@ -312,7 +192,7 @@ class Request(Message):
             self.params: ParamsRPC = []
 
         self.method: Final[str] = method
-        self.id: Final[str] = id or _id_new()
+        self.id: Final[ID] = id or _id_new()
 
     @overload
     def response(self) -> "Response":
@@ -333,8 +213,10 @@ class Request(Message):
         #   these Keywords anyway, so if this raises an Exception, it should.
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
-        # TODO
-        ...
+        yield "jsonrpc", self.jsonrpc
+        yield "method", self.method
+        yield "params", self.params
+        yield "id", self.id
 
 
 class Response(Message):
@@ -363,7 +245,7 @@ class Response(Message):
         error: Error = None,
         result: ParamsRPC = None
     ):
-        self.id: Final[str] = request.id if isinstance(request, Request) else request
+        self.id: Final[ID] = request.id if isinstance(request, Request) else request
 
         self.error: Optional[Error] = None
         self.result: Optional[ParamsRPC] = None
@@ -401,8 +283,14 @@ class Response(Message):
             return None
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
-        # TODO
-        ...
+        yield "jsonrpc", self.jsonrpc
+
+        if self.error is not None:
+            yield "error", self.error
+        else:
+            yield "result", self.result or []
+
+        yield "id", self.id
 
 
 class Batch(List[Union[Notification, Request]]):

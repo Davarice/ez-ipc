@@ -40,9 +40,10 @@ from .handlers import rpc_response, request_handler, response_handler
 from .protocol import (
     Error,
     JRPC,
-    make_notif,
-    make_request,
-    make_response,
+    Message,
+    Notification,
+    Request,
+    Response,
 )
 
 
@@ -503,11 +504,11 @@ class Remote:
         try:
             self.total_sent["notif"] += 1
             if isinstance(params, dict):
-                await self.send(make_notif(meth, **params))
+                await self.send(Notification(meth, **params))
             elif isinstance(params, (list, tuple)):
-                await self.send(make_notif(meth, *params))
+                await self.send(Notification(meth, *params))
             else:
-                await self.send(make_notif(meth))
+                await self.send(Notification(meth))
         except Exception as e:
             err_("Failed to send Notification:", e)
             if nohandle:
@@ -538,13 +539,13 @@ class Remote:
         self.total_sent["request"] += 1
 
         if isinstance(params, dict):
-            data, mid = make_request(meth, **params)
+            req = Request(meth, **params)
         elif isinstance(params, (list, tuple)):
-            data, mid = make_request(meth, *params)
+            req = Request(meth, *params)
         else:
-            data, mid = make_request(meth)
+            req = Request(meth)
 
-        self.futures[mid] = future
+        self.futures[req.id] = future
 
         if callback:
             cb = partial(callback, remote=self)
@@ -552,7 +553,7 @@ class Remote:
             future.add_done_callback(cb)
 
         try:
-            await self.send(data)
+            await self.send(req)
         except Exception as e:
             err_("Failed to send Request:", e)
             if nohandle:
@@ -622,7 +623,7 @@ class Remote:
             self.total_sent["response"] += 1
             try:
                 await self.send(
-                    make_response(mid, err=err) if err else make_response(mid, res=res)
+                    Response(mid, error=err) if err else Response(mid, result=res)
                 )
             except Exception as e:
                 # noinspection PyCallingNonCallable
@@ -630,9 +631,9 @@ class Remote:
                 if nohandle:
                     raise e
 
-    async def send(self, data: str) -> None:
+    async def send(self, msg: Message) -> None:
         if self.open:
-            await self.connection.write(data)
+            await self.connection.write(str(msg))
 
     async def terminate(self, reason: str = None) -> None:
         if self.open:
