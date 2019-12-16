@@ -24,9 +24,11 @@ from json import JSONDecodeError
 from secrets import randbits
 from typing import (
     Any,
+    AsyncGenerator,
     Awaitable,
     Callable,
     Dict,
+    Generator,
     List,
     Optional,
     overload,
@@ -165,33 +167,30 @@ class Remote:
         """
 
         @self.hook_request("PING")
-        def cb_ping(msg: Request, _remote: Remote) -> rpc_response:
-            return msg.params
+        def cb_ping(data, _):
+            return data
 
         @self.hook_request("RSA.EXCH")
-        async def cb_rsa_exchange(msg: Request, remote: Remote):
-            if remote.connection.can_encrypt:
+        async def cb_rsa_exchange(data: list, _):
+            if self.connection.can_encrypt:
                 echo(
                     "info",
-                    [
-                        "Receiving request for Secure Connection. Sending Key.",
-                        "(The connection is not encrypted yet.)",
-                    ],
+                    "Receiving request for Secure Connection. Sending Key.",
                 )
-                remote.connection.add_keys(*msg.params)
-                return remote.connection.keys
+                self.connection.add_keys(*data)
+                return self.connection.keys
             else:
                 err_("Cannot establish a Secure Connection.")
                 return Error(92, "Encryption Unavailable")
 
         @self.hook_request("RSA.CONF")
-        async def cb_rsa_confirm(msg: Request, remote: Remote):
-            if remote.connection.encryption_ready():
-                await remote.respond(msg.id, msg.method, res=[True])
-                remote.connection.begin_encryption()
+        def cb_rsa_confirm(_data, _):
+            if self.connection.encryption_ready():
+                yield [True]
+                self.connection.begin_encryption()
                 echo("win", "Connection Secured by RSA Key Exchange.")
             else:
-                return Error(1, "Cannot Activate")
+                yield Error(1, "Cannot Activate")
 
     def _id_new(self) -> str:
         return f"{self.id}/{randbits(24):0>6X}"
@@ -205,8 +204,8 @@ class Remote:
             return False
         else:
             # Ask the remote Host for its Public Key, while providing our own.
-            remote_pub, remote_ver = await self.request_wait(
-                "RSA.EXCH", self.connection.keys, [None, None]
+            remote_pub, remote_ver = await self.request(
+                "RSA.EXCH", self.connection.keys, timeout=10
             )
 
             if remote_pub and remote_ver:
@@ -215,13 +214,15 @@ class Remote:
                 return False
 
             # Double check that the remote Host is ready to start encrypting.
-            if (await self.request_wait("RSA.CONF", [True], [False]))[0]:
+            try:
+                await self.request("RSA.CONF", [True], timeout=10)
+            except:
+                # Something went wrong. Do NOT switch to encryption.
+                return False
+            else:
                 # We can now start using encryption.
                 self.connection.begin_encryption()
                 return True
-            else:
-                # Something went wrong. Do NOT switch to encryption.
-                return False
 
     def process_message(self, msg: Message) -> Optional[Response]:
         """A set of data has been received. If it is a Response, get the Future
@@ -269,7 +270,7 @@ class Remote:
             if msg.method in hooks:
                 # We know where to send this type of Request.
                 echo("recv", f"Receiving {hl_method(msg.method)} Request from {self}.")
-                return hooks[msg.method](msg, self)
+                return hooks[msg.method](msg.params, self)
             else:
                 # We have no hook for this method; Return an Error.
                 warn(f"Receiving invalid {msg.method} Request from {self!r}.")
@@ -294,7 +295,7 @@ class Remote:
                     "recv",
                     f"Receiving {hl_method(msg.method)} Notification from {self}.",
                 )
-                return hooks[msg.method](msg, self)
+                return hooks[msg.method](msg.params, self)
             else:
                 # We have no hook for this method; Return an Error.
                 warn(f"Receiving invalid {msg.method} Notification from {self!r}.")
@@ -392,24 +393,50 @@ class Remote:
                 except UnicodeDecodeError:
                     warn(f"Corrupt data received from {self!r}.")
 
-                ## TODO: Does this catch still matter?
-                # except ConnectionError as e:
-                #     # Whatever just happened was too much to just die calmly. Close
-                #     #   down the entire Remote.
-                #     if self.open:
-                #         self.close()
-                #         echo("dcon", f"Connection with {self} closed: {e}")
-
                 else:
-                    responses: List[Response] = Batch()
+                    responses: Batch = Batch()
                     tasks: Dict[Message, Awaitable] = {}
 
                     for recv, tsk in data.items():
+                        # Loop through the Processors of all Data received.
                         if isinstance(tsk, Response):
+                            # If the Processor returned a Response, add it to
+                            #   the Batch.
                             responses.append(tsk)
+
+                        elif isinstance(tsk, (dict, list, tuple)):
+                            # If the Processor returned something that can be
+                            #   made into a Response, do it and add it.
+                            if isinstance(recv, Request):
+                                responses.append(recv.response(result=tsk))
+
+                        elif isinstance(tsk, Exception):
+                            # If it returned an Exception, wrap it in an Error
+                            #   and add it.
+                            if isinstance(recv, Request):
+                                responses.append(
+                                    recv.response(error=Error.from_exception(tsk))
+                                )
+
                         elif isawaitable(tsk):
+                            # If it can be Awaited, add it as a Task.
                             tasks[recv] = tsk
 
+                        elif isinstance(tsk, AsyncGenerator):
+                            # If it is an Async Generator, this means that the
+                            #   Processor will Yield something, and then it has
+                            #   some cleanup afterwards. Add the ANext as a
+                            #   Task.
+                            tasks[recv] = tsk.__anext__()
+
+                        elif isinstance(tsk, Generator):
+                            # If it is a Sync Generator, same deal; However, it
+                            #   must be wrapped in a Task first.
+                            async def _n():
+                                return next(tsk)
+                            tasks[recv] = _n()
+
+                    # Gather and Await all the Tasks.
                     finals = dict(
                         zip(
                             tasks.keys(),
@@ -418,29 +445,37 @@ class Remote:
                     )
 
                     for recv, ret in finals.items():
+                        # Add the Responses of the Tasks to the Batch.
                         if isinstance(ret, Response):
+                            # All native Responses are added directly.
                             responses.append(ret)
 
                         elif isinstance(ret, (dict, list, tuple)):
+                            # Structures are wrapped and Added...IF the original
+                            #   Message was a Request.
                             if isinstance(recv, Request):
                                 responses.append(recv.response(result=ret))
 
                         elif isinstance(ret, Exception):
+                            # Exceptions are again wrapped in Errors.
                             if isinstance(recv, Request):
                                 responses.append(
                                     recv.response(error=Error.from_exception(ret))
                                 )
 
-                    # if isinstance(data, dict):
-                    #     data = [data]
-                    #
-                    # tasks: List[List[Task]] = [[] for _ in data]
-                    #
-                    # await gather(
-                    #     *(map(self.process_message, data, tasks)),
-                    #     return_exceptions=True,
-                    # )
-                    # await gather(*chain(*tasks), return_exceptions=True)
+                    # # # SEND THE BATCH # # #
+                    if responses:
+                        await self.send_batch(responses)
+                    # # # ============== # # #
+
+                    for original in data.values():
+                        # Now, handle any Cleanup required by Generators.
+                        if isinstance(original, AsyncGenerator):
+                            async for _ in original:
+                                pass
+                        elif isinstance(original, Generator):
+                            for _ in original:
+                                pass
 
                 finally:
                     self.lines.task_done()
@@ -673,10 +708,18 @@ class Remote:
                 if nohandle:
                     raise e
 
-    async def send(self, msg: Message) -> None:
-        echo(str(msg))
+    async def send(self, msg: Message) -> int:
+        # echo(str(msg))
         if self.open:
-            await self.connection.write(str(msg))
+            return await self.connection.write(str(msg))
+        else:
+            return 0
+
+    async def send_batch(self, batch: Batch) -> int:
+        if batch and self.open:
+            return await self.connection.write(batch.json())
+        else:
+            return 0
 
     async def terminate(self, reason: str = None) -> None:
         if self.open:

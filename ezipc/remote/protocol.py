@@ -157,33 +157,37 @@ class JRPC(IntEnum):
             structure = [structure]
 
         for msg in structure:
-            mtype = cls.check(msg)
+            try:
+                mtype = cls.check(msg)
 
-            if mtype is cls.NOTIF:
-                params = msg.get("params")
+                if mtype is cls.NOTIF:
+                    params = msg.get("params")
 
-                if isinstance(params, dict):
-                    yield Notification(msg["method"], **params)
-                elif isinstance(params, list):
-                    yield Notification(msg["method"], *params)
-                else:
-                    yield Notification(msg["method"])
+                    if isinstance(params, dict):
+                        yield Notification(msg["method"], **params)
+                    elif isinstance(params, list):
+                        yield Notification(msg["method"], *params)
+                    else:
+                        yield Notification(msg["method"])
 
-            elif mtype is cls.REQUEST:
-                params = msg.get("params")
+                elif mtype is cls.REQUEST:
+                    params = msg.get("params")
 
-                if isinstance(params, dict):
-                    yield Request(msg["method"], mid=msg["id"], **params)
-                elif isinstance(params, list):
-                    yield Request(msg["method"], *params, mid=msg["id"])
-                else:
-                    yield Request(msg["method"], mid=msg["id"])
+                    if isinstance(params, dict):
+                        yield Request(msg["method"], **params, mid=msg["id"])
+                    elif isinstance(params, (list, tuple)):
+                        yield Request(msg["method"], *params, mid=msg["id"])
+                    else:
+                        yield Request(msg["method"], mid=msg["id"])
 
-            elif mtype is cls.RESPONSE:
-                # noinspection PyArgumentList
-                yield Response(
-                    msg["id"], error=msg.get("error"), result=msg.get("result")
-                )
+                elif mtype is cls.RESPONSE:
+                    if "error" in msg:
+                        yield Response(msg["id"], error=Error(**msg["error"]))
+                    else:
+                        yield Response(msg["id"], result=msg.get("result", []))
+
+            except Exception as e:
+                yield e
 
 
 class Message(ABC):
@@ -317,7 +321,7 @@ class Response(Message):
         request: Union[Request, ID],
         *,
         error: Error = None,
-        result: ParamsRPC = None
+        result: ParamsRPC = None,
     ):
         self.id: Final[ID] = request.id if isinstance(request, Request) else request
 
@@ -348,14 +352,6 @@ class Response(Message):
             self.error = error
             self.result = result
 
-    def __bool__(self) -> Optional[bool]:
-        if self.result is not None:
-            return True
-        elif self.error is not None:
-            return False
-        else:
-            return None
-
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
         yield "jsonrpc", self.jsonrpc
 
@@ -372,4 +368,7 @@ class Batch(List[Message]):
         super().__init__(a)
 
     def flat(self) -> List[Dict[str, Any]]:
-        return [dict(msg) for msg in self]
+        return [dict(msg) for msg in self if msg]
+
+    def json(self) -> str:
+        return dumps(self.flat(), **JSON_OPTS)

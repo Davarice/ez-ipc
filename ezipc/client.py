@@ -87,7 +87,7 @@ class Client:
         return bool(self.remote and not self.remote.outstr.is_closing())
 
     async def setup(self):
-        response = await self.remote.request_wait("ETC.INIT")
+        response = await self.remote.request("ETC.INIT", timeout=10)
 
         if response:
             self.remote.id = response.get("id") or mkid(self.remote)
@@ -133,9 +133,9 @@ class Client:
         else:
             # Function provided. Hook it directly.
             @wraps(func)
-            async def handler(msg: Notification, _conn: Remote):
+            async def handler(data, _conn: Remote):
                 try:
-                    await func(msg.params)
+                    await func(data)
                 except Exception as e:
                     err(f"Notification raised Exception:", e)
 
@@ -162,12 +162,12 @@ class Client:
             params = len(signature(func).parameters)
 
             @wraps(func)
-            async def handler(msg: Request, conn: Remote):
+            async def handler(data, conn: Remote):
                 try:
                     if params == 1:
-                        res = await func(msg.params)
+                        res = await func(data)
                     else:
-                        res = await func(msg.params, conn)
+                        res = await func(data, conn)
                 except Exception as e:
                     await conn.respond(
                         msg.id, msg.method, err=Error.from_exception(e),
