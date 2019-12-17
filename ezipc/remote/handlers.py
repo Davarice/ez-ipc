@@ -63,7 +63,7 @@ def notif_handler(hooks: Dict[str, Callable], method: str) -> Callable:
             :param Remote remote: A Remote Object representing the IPC interface
                 to another, possibly non-local, Process.
             """
-            if len(signature(func).parameters) == 2:
+            if len(signature(func).parameters) > 1:
                 return func(notif.params, remote)
             else:
                 return func(notif.params)
@@ -114,7 +114,7 @@ def request_handler(hooks: Dict[str, Callable], method: str) -> Callable:
             :param Remote remote: A Remote Object representing the IPC interface
                 to another, possibly non-local, Process.
             """
-            if len(signature(func).parameters) == 2:
+            if len(signature(func).parameters) > 1:
                 return func(request.params, remote)
             else:
                 return func(request.params)

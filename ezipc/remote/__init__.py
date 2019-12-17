@@ -172,8 +172,7 @@ class Remote:
         async def cb_rsa_exchange(data: list):
             if self.connection.can_encrypt:
                 echo(
-                    "info",
-                    "Receiving request for Secure Connection. Sending Key.",
+                    "info", "Receiving request for Secure Connection. Sending Key.",
                 )
                 self.connection.add_keys(*data)
                 return self.connection.keys
@@ -406,7 +405,14 @@ class Remote:
                             #   must be wrapped in a Task first.
                             async def _n():
                                 return next(tsk)
+
                             tasks[recv] = _n()
+
+                        elif isinstance(recv, Request):
+                            # Anything else is wrapped within a List.
+                            responses.append(
+                                recv.response(result=[] if tsk is None else [tsk])
+                            )
 
                     # Gather and Await all the Tasks.
                     finals = dict(
@@ -434,6 +440,12 @@ class Remote:
                                 responses.append(
                                     recv.response(error=Error.from_exception(ret))
                                 )
+
+                        elif isinstance(recv, Request):
+                            # Anything else is wrapped within a List.
+                            responses.append(
+                                recv.response(result=[] if ret is None else [ret])
+                            )
 
                     # # # SEND THE BATCH # # #
                     if responses:
@@ -668,7 +680,6 @@ class Remote:
                     raise e
 
     async def send(self, msg: Message) -> int:
-        # echo(str(msg))
         if self.open:
             return await self.connection.write(str(msg))
         else:
