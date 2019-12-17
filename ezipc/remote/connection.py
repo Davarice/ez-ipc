@@ -1,4 +1,5 @@
 from asyncio import StreamReader, StreamWriter
+from base64 import b85decode as dearmor, b85encode as armor
 from typing import List, Optional, Union
 
 try:
@@ -54,7 +55,7 @@ class Connection:
     )
 
     def __init__(
-        self, instr: StreamReader, outstr: StreamWriter, *, encoding: str = "utf-16",
+        self, instr: StreamReader, outstr: StreamWriter, *, encoding: str = "utf-8",
     ):
         self.instr: StreamReader = instr
         self.outstr: StreamWriter = outstr
@@ -90,24 +91,28 @@ class Connection:
             else None
         )
 
-    def _decrypt(self, ctext: bytes) -> bytes:
+    def _decode(self, bytes_cipher: bytes) -> str:
         if self.encrypted:
-            ptext = self.box.decrypt(ctext)
+            bytes_plain: bytes = self.box.decrypt(dearmor(bytes_cipher))
             if self.key_other_ver:
-                return self.key_other_ver.verify(ptext)
-            else:
-                return ptext
+                bytes_plain = self.key_other_ver.verify(bytes_plain)
         else:
-            return ctext
+            bytes_plain = dearmor(bytes_cipher)
 
-    def _encrypt(self, ptext: bytes) -> bytes:
+        return bytes_plain.decode(self.encoding)
+
+    def _encode(self, str_plain: str) -> bytes:
+        bytes_plain: bytes = str_plain.encode(self.encoding)
+
         if self.encrypted:
             if self._key_sign:
-                ptext = self._key_sign.sign(ptext)
+                bytes_plain = self._key_sign.sign(bytes_plain)
 
-            return self.box.encrypt(ptext)
+            bytes_cipher = self.box.encrypt(bytes_plain)
         else:
-            return ptext
+            bytes_cipher = bytes_plain
+
+        return armor(bytes_cipher)
 
     def add_keys(self, pubkey: str, verkey: str) -> None:
         if pubkey and verkey and self.can_encrypt:
@@ -136,11 +141,11 @@ class Connection:
     async def read(self) -> str:
         ctext: bytes = await self.instr.readuntil(sep)
         self.total_recv += len(ctext)
-        ptext: str = self._decrypt(ctext[: -len(sep)]).decode(self.encoding)
+        ptext: str = self._decode(ctext[: -len(sep)])
         return ptext
 
     async def write(self, ptext: str) -> int:
-        ctext: bytes = self._encrypt(ptext.encode(self.encoding))
+        ctext: bytes = self._encode(ptext)
         self.outstr.write(ctext)
         self.outstr.write(sep)
 

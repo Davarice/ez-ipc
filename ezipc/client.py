@@ -8,21 +8,16 @@ from asyncio import (
     wait_for,
 )
 from datetime import datetime as dt
-from functools import partial, wraps
-from inspect import signature
-from typing import Callable, Optional, overload, Union
+from typing import Callable, Optional, Union
 
 from .remote import (
     can_encrypt,
-    Error,
     mkid,
-    Notification,
+    notif_handler,
     Remote,
     RemoteError,
-    Request,
     request_handler,
     rpc_response,
-    TV,
 )
 from .util import callback_response, echo, err, P, warn
 
@@ -102,7 +97,7 @@ class Client:
 
         echo("info", f"Starting Secure Connection with {self.remote}...")
         try:
-            if await wait_for(self.remote.enable_rsa(), 10):
+            if await self.remote.enable_rsa():
                 echo("win", f"Connection with {self.remote} secured.")
             else:
                 err(
@@ -115,68 +110,23 @@ class Client:
                 f" Connection is !>>> NOT SECURE <<<!"
             )
 
-    @overload
-    def hook_notif(self, method: str) -> Callable[[TV], TV]:
-        ...
-
-    @overload
-    def hook_notif(self, method: str, func: TV) -> TV:
-        ...
-
-    def hook_notif(self, method: str, func=None):
+    def hook_notif(self, method: str):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
+
+        The provided Function should take two arguments: The first is the Data
+            of the Notification, and the second is the Remote.
         """
-        if func is None:
-            # Function NOT provided. Return a Decorator.
-            return partial(self.hook_notif, method)
-        else:
-            # Function provided. Hook it directly.
-            @wraps(func)
-            async def handler(data, _conn: Remote):
-                try:
-                    await func(data)
-                except Exception as e:
-                    err(f"Notification raised Exception:", e)
+        return notif_handler(self.hooks_notif, method)
 
-            self.hooks_notif[method] = handler
-            return func
-
-    @overload
-    def hook_request(self, method: str) -> Callable[[TV], TV]:
-        ...
-
-    @overload
-    def hook_request(self, method: str, func: TV) -> TV:
-        ...
-
-    def hook_request(self, method: str, func=None):
+    def hook_request(self, method: str) -> Callable:
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
+
+        The provided Function should take two arguments: The first is the Data
+            of the Request, and the second is the Remote.
         """
-        if func is None:
-            # Function NOT provided. Return a Decorator.
-            return partial(self.hook_request, method)
-        else:
-            # Function provided. Hook it directly.
-            params = len(signature(func).parameters)
-
-            @wraps(func)
-            async def handler(data, conn: Remote):
-                try:
-                    if params == 1:
-                        res = await func(data)
-                    else:
-                        res = await func(data, conn)
-                except Exception as e:
-                    await conn.respond(
-                        msg.id, msg.method, err=Error.from_exception(e),
-                    )
-                else:
-                    await conn.respond(msg.id, msg.method, res=res)
-
-            self.hooks_request[method] = handler
-            return func
+        return request_handler(self.hooks_request, method)
 
     async def connect(
         self, loop: AbstractEventLoop, helpers: int = 5, timeout: Union[float, int] = 10

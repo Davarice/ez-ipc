@@ -34,7 +34,7 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
             #   arg so that it will be called as soon as the Future is ready.
             pongs.append(
                 asyncio.create_task(
-                    _client.remote.request_wait(
+                    _client.remote.request(
                         "PING", [i], callback=receive, timeout=4
                     )
                 )
@@ -42,7 +42,7 @@ def client_test(addr: str = "127.0.0.1", port: int = 9002, verb=4, CLIENTS=1):
         await asyncio.sleep(1)
         pongs.append(
             asyncio.create_task(
-                _client.remote.request_wait("PING", None, callback=receive, timeout=4)
+                _client.remote.request("PING", [], callback=receive, timeout=4)
             )
         )
 

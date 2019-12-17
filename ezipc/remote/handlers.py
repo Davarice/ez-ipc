@@ -1,10 +1,9 @@
 from asyncio import Future
 from functools import wraps
-from os import strerror
-from typing import Callable, Coroutine, Tuple, TYPE_CHECKING, TypeVar, Union
+from inspect import signature
+from typing import Callable, Dict, Tuple, TYPE_CHECKING, TypeVar, Union
 
-from .protocol import Error
-from ..util import err
+from .protocol import Notification, Request
 
 if TYPE_CHECKING:
     from . import Remote
@@ -25,140 +24,173 @@ rpc_response: type = Union[
 ]
 
 
-def request_handler(host: Remote, method: str) -> Callable:
-    """Generate a Decorator which will wrap a Coroutine in a Request Handler
+def notif_handler(hooks: Dict[str, Callable], method: str) -> Callable:
+    """Generate a Decorator which will wrap a Function in a Request Handler
     and add a Callback Hook for a given RPC Method.
 
-    For use with a Coroutine that **RECEIVES A REQUEST**, and **MUST SEND BACK**
-    a message with a Reponse.
+    For use with a Function that **RECEIVES A NOTIFICATION**.
 
-    :param Remote host: A Remote Object representing the IPC interface to
-        another, possibly non-local, Process.
+    :param dict hooks: A Mapping associating String Methods to their respective
+        Callables.
     :param str method: The JSON-RPC Method that the Decorator will hook the
-        passed Coroutine to listen for, like LOGIN or PING
+        passed Function to listen for, like LOGIN or PING.
 
-    :return: The Decorator Function that the next-defined Coroutine will
+    :return: The Decorator Function that the next-defined Function will
         *actually* be passed to.
     :rtype: Callable
     """
 
-    def decorator(coro: Callable) -> Callable:
-        """Wrap a Coroutine in a Wrapper that will allow it to send back a
+    def decorator(func: Callable) -> Callable:
+        """Wrap a Function in a Wrapper that will allow it to send back a
         Response by simply Returning values.
 
-        :param Callable coro: A Coroutine which will be passed the incoming
+        :param Callable func: A Function which will be passed the incoming
             Request Data should have one of a specific set of valid Signatures.
 
-        :return: A Wrapped Coroutine which will Await the input Coroutine, and
+        :return: A Wrapped Function which will call the input Function, and
             then send a Response Message back to the Remote that sent it, with a
             Result or Error attached as appropriate.
-        :rtype: Callable[[Union[dict, list], Remote], Coroutine]
+        :rtype: Callable[[Union[dict, list], Remote], Callable]
         """
 
-        @wraps(coro)
-        async def handle_request(data: dl, remote: Remote) -> None:
-            """Given Data and a Remote, execute the Coroutine provided above,
-            and capture its Return. Then, use the Return to construct and send
-            back a Response.
+        @wraps(func)
+        def handle_notif(notif: Notification, remote: Remote):
+            """Given Data and a Remote, execute the Function provided above,
+            and capture its Return.
 
-            :param Union[dict, list] data: Data received from the Remote as part
-                of the Request Message.
+            :param Notification notif: Data received from the Remote as the
+                Notification Message.
             :param Remote remote: A Remote Object representing the IPC interface
                 to another, possibly non-local, Process.
             """
-            res: Union[Coroutine, rpc_response] = coro(data, remote)
-            while isinstance(res, Coroutine):
-                # This is *probably* a Coroutine, but it may just be a Function.
-                #   Check before blindly trying to Await.
-                res = await res
-            outcome: rpc_response = res
+            if len(signature(func).parameters) == 2:
+                return func(notif.params, remote)
+            else:
+                return func(notif.params)
 
-            try:
-                if outcome is not None:
-                    if isinstance(outcome, int):
-                        # Received a Return Status, but no Data. Make an empty
-                        #   List to hold all the Data we do not have.
-                        code: int = outcome
-                        outcome: list = []
+        hooks[method] = handle_notif
+        return handle_notif
 
-                    elif isinstance(outcome, (dict, list)):
-                        # Received no Return Status, but received something that
-                        #   is probably Data. Assume Success and send Response.
-                        await remote.respond(
-                            data["id"], data.get("method", method), res=outcome
-                        )
-                        return
+    return decorator
 
-                    elif isinstance(outcome, tuple):
-                        # Received multiple Returns. The first should be a
-                        #   Status Code, but the rest will vary.
-                        outcome: list = list(outcome)
-                        code: int = outcome.pop(0)
 
-                    else:
-                        # Your Data is bad, and you should feel bad.
-                        await remote.respond(
-                            data["id"],
-                            data.get("method", method),
-                            err=Error(
-                                -32001,
-                                "Server error",
-                                [
-                                    "Handler method '{}' returned erroneous "
-                                    "Type. Contact Project Maintainer.".format(
-                                        coro.__name__
-                                    )
-                                ],
-                            ),
-                        )
-                        return
+def request_handler(hooks: Dict[str, Callable], method: str) -> Callable:
+    """Generate a Decorator which will wrap a Function in a Request Handler
+    and add a Callback Hook for a given RPC Method.
 
-                    if code != 0:
-                        # ERROR. Send an Error Response.
-                        if outcome:
-                            # Retrieve further information.
-                            message = outcome.pop(0)
-                            errdat = outcome.pop(0) if outcome else None
-                        else:
-                            # No further information available.
-                            try:
-                                message = strerror(code)
-                            except ValueError:
-                                message = "Unknown error {}".format(code)
+    For use with a Function that **RECEIVES A REQUEST**, and **MUST SEND BACK**
+    a message with a Reponse.
 
-                            errdat = None
+    :param dict hooks: A Mapping associating String Methods to their respective
+        Callables.
+    :param str method: The JSON-RPC Method that the Decorator will hook the
+        passed Function to listen for, like LOGIN or PING.
 
-                        await remote.respond(
-                            data["id"],
-                            data.get("method", method),
-                            err=Error(code, message, errdat),
-                        )
-                    else:
-                        # No error. Send a Result Response.
-                        resdat = outcome.pop(0) if outcome else []
+    :return: The Decorator Function that the next-defined Function will
+        *actually* be passed to.
+    :rtype: Callable
+    """
 
-                        await remote.respond(
-                            data["id"], data.get("method", method), res=resdat
-                        )
-                else:
-                    # Returned None, therefore Return None.
-                    return
+    def decorator(func: Callable) -> Callable:
+        """Wrap a Function in a Wrapper that will allow it to send back a
+        Response by simply Returning values.
 
-            except Exception as e:
-                # The whole system is on fire.
-                err(
-                    "Exception raised by Request Handler"
-                    " for '{}':".format(coro.__name__),
-                    e,
-                )
-                if "id" in data:
-                    await remote.respond(
-                        data["id"],
-                        data.get("method", method),
-                        err=Error(121, type(e).__name__, [str(e)]),
-                    )
+        :param Callable func: A Function which will be passed the incoming
+            Request Data should have one of a specific set of valid Signatures.
 
-        host.hooks_request[method] = handle_request
+        :return: A Wrapped Function which will call the input Function, and
+            then send a Response Message back to the Remote that sent it, with a
+            Result or Error attached as appropriate.
+        :rtype: Callable[[Union[dict, list], Remote], Callable]
+        """
+
+        @wraps(func)
+        def handle_request(request: Request, remote: Remote):
+            """Given Data and a Remote, execute the Function provided above,
+            and capture its Return.
+
+            :param Request request: Data received from the Remote as the Request
+                Message.
+            :param Remote remote: A Remote Object representing the IPC interface
+                to another, possibly non-local, Process.
+            """
+            if len(signature(func).parameters) == 2:
+                return func(request.params, remote)
+            else:
+                return func(request.params)
+
+            # res: Union[Coroutine, rpc_response] = coro(request.params, host)
+            # while isinstance(res, Coroutine):
+            #     # This is *probably* a Coroutine, but it may just be a Function.
+            #     #   Check before blindly trying to Await.
+            #     res = await res
+            # outcome: rpc_response = res
+            #
+            # try:
+            #     if outcome is not None:
+            #         ...
+            #
+            #         # if isinstance(outcome, int):
+            #         #     # Received a Return Status, but no Data. Make an empty
+            #         #     #   List to hold all the Data we do not have.
+            #         #     code: int = outcome
+            #         #     outcome: list = []
+            #         #
+            #         # elif isinstance(outcome, (dict, list)):
+            #         #     # Received no Return Status, but received something that
+            #         #     #   is probably Data. Assume Success and send Response.
+            #         #     return request.response(result=outcome)
+            #         #
+            #         # elif isinstance(outcome, tuple):
+            #         #     # Received multiple Returns. The first should be a
+            #         #     #   Status Code, but the rest will vary.
+            #         #     outcome: list = list(outcome)
+            #         #     code: int = outcome.pop(0)
+            #         #
+            #         # else:
+            #         #     # Your Data is bad, and you should feel bad.
+            #         #     return request.response(
+            #         #         error=Error(
+            #         #             -32001,
+            #         #             "Server error",
+            #         #             [
+            #         #                 f"Handler method {coro.__name__!r} returned erroneous "
+            #         #                 f"Type. Contact Project Maintainer."
+            #         #             ],
+            #         #         ),
+            #         #     )
+            #
+            #         # if code != 0:
+            #         #     # ERROR. Send an Error Response.
+            #         #     if outcome:
+            #         #         # Retrieve further information.
+            #         #         message = outcome.pop(0)
+            #         #         errdat = outcome.pop(0) if outcome else None
+            #         #     else:
+            #         #         # No further information available.
+            #         #         try:
+            #         #             message = strerror(code)
+            #         #         except ValueError:
+            #         #             message = f"Unknown error {code}"
+            #         #
+            #         #         errdat = None
+            #         #
+            #         #     return request.response(error=Error(code, message, errdat))
+            #         # else:
+            #         #     # No error. Send a Result Response.
+            #         #     resdat = outcome.pop(0) if outcome else []
+            #         #
+            #         #     return request.response(result=resdat)
+            #     else:
+            #         # Returned None, therefore Return None.
+            #         return request.response()
+            #
+            # except Exception as e:
+            #     # The whole system is on fire.
+            #     err(f"Exception raised by Request Handler for {coro.__name__!r}:", e)
+            #     return request.response(error=Error(121, type(e).__name__, [str(e)]))
+
+        hooks[method] = handle_request
         return handle_request
 
     return decorator
@@ -180,12 +212,12 @@ def response_handler(
 
     :param Remote remote: A Remote Object representing the IPC interface to
         another, possibly non-local, Process.
-    :param Callable win: A Function to be dispatched the
-        Result of a Future if the Future comes back successful.
-    :param Callable fail: A Function to be dispatched
-        the Exception returned by a Future which is not successful.
-    :param Callable cancel: A Function to be dispatched with no
-        arguments if the Future is Cancelled.
+    :param Callable win: A Function to be dispatched the Result of a Future if
+        the Future comes back successful.
+    :param Callable fail: A Function to be dispatched the Exception returned by
+        a Future which is not successful.
+    :param Callable cancel: A Function to be dispatched with no arguments if the
+        Future is Cancelled.
 
     :return: A Callback Function which receives a Future and dispatches it to
         one of the provided Functions.

@@ -13,7 +13,6 @@ from asyncio import (
     StreamReader,
     StreamWriter,
     Task,
-    TimeoutError,
     wait_for,
 )
 from collections import Counter
@@ -23,7 +22,6 @@ from inspect import isawaitable
 from json import JSONDecodeError
 from secrets import randbits
 from typing import (
-    Any,
     AsyncGenerator,
     Awaitable,
     Callable,
@@ -49,7 +47,7 @@ from ..util.output import (
 )
 from .connection import can_encrypt, Connection
 from .exc import RemoteError
-from .handlers import rpc_response, request_handler, response_handler
+from .handlers import rpc_response, notif_handler, request_handler, response_handler
 from .protocol import (
     Batch,
     Error,
@@ -167,11 +165,11 @@ class Remote:
         """
 
         @self.hook_request("PING")
-        def cb_ping(data, _):
+        def cb_ping(data):
             return data
 
         @self.hook_request("RSA.EXCH")
-        async def cb_rsa_exchange(data: list, _):
+        async def cb_rsa_exchange(data: list):
             if self.connection.can_encrypt:
                 echo(
                     "info",
@@ -184,7 +182,7 @@ class Remote:
                 return Error(92, "Encryption Unavailable")
 
         @self.hook_request("RSA.CONF")
-        def cb_rsa_confirm(_data, _):
+        def cb_rsa_confirm(_data):
             if self.connection.encryption_ready():
                 yield [True]
                 self.connection.begin_encryption()
@@ -224,7 +222,7 @@ class Remote:
                 self.connection.begin_encryption()
                 return True
 
-    def process_message(self, msg: Message) -> Optional[Response]:
+    def process_message(self, msg: Message) -> Optional[Union[Exception, Response]]:
         """A set of data has been received. If it is a Response, get the Future
         waiting for it and set its Result. Otherwise, find a Hook waiting for
         the Method received, and run it.
@@ -270,7 +268,11 @@ class Remote:
             if msg.method in hooks:
                 # We know where to send this type of Request.
                 echo("recv", f"Receiving {hl_method(msg.method)} Request from {self}.")
-                return hooks[msg.method](msg.params, self)
+                try:
+                    return hooks[msg.method](msg, self)
+                except Exception as e:
+                    warn("Unknown Error:", e)
+                    return e
             else:
                 # We have no hook for this method; Return an Error.
                 warn(f"Receiving invalid {msg.method} Request from {self!r}.")
@@ -295,7 +297,11 @@ class Remote:
                     "recv",
                     f"Receiving {hl_method(msg.method)} Notification from {self}.",
                 )
-                return hooks[msg.method](msg.params, self)
+                try:
+                    return hooks[msg.method](msg, self)
+                except Exception as e:
+                    warn("Unknown Error:", e)
+                    return e
             else:
                 # We have no hook for this method; Return an Error.
                 warn(f"Receiving invalid {msg.method} Notification from {self!r}.")
@@ -310,57 +316,23 @@ class Remote:
         #             msg, error=Error.invalid_request(list(dict(msg).keys()))
         #         )
 
-    @overload
-    def hook_notif(self, method: str) -> Callable[[TV], TV]:
-        ...
-
-    @overload
-    def hook_notif(self, method: str, func: TV) -> TV:
-        ...
-
-    def hook_notif(self, method: str, func=None):
+    def hook_notif(self, method: str):
         """Signal to the Remote that `func` is waiting for Notifications of the
             provided `method` value.
 
         The provided Function should take two arguments: The first is the Data
             of the Notification, and the second is the Remote.
         """
-        if func is not None:
-            # Function provided. Hook it directly.
-            self.hooks_notif[method] = func
-        else:
-            # Function NOT provided. Return a Decorator.
-            def hook(func_):
-                self.hooks_notif[method] = func_
-                return func_
+        return notif_handler(self.hooks_notif, method)
 
-            return hook
-
-    @overload
-    def hook_request(self, method: str) -> Callable[[TV], TV]:
-        ...
-
-    @overload
-    def hook_request(self, method: str, func: TV) -> TV:
-        ...
-
-    def hook_request(self, method: str, func=None) -> Callable:
+    def hook_request(self, method: str) -> Callable:
         """Signal to the Remote that `func` is waiting for Requests of the
             provided `method` value.
 
         The provided Function should take two arguments: The first is the Data
             of the Request, and the second is the Remote.
         """
-        if func is not None:
-            # Function provided. Hook it directly.
-            self.hooks_request[method] = func
-        else:
-            # Function NOT provided. Return a Decorator.
-            def hook(func_):
-                self.hooks_request[method] = func_
-                return func_
-
-            return hook
+        return request_handler(self.hooks_request, method)
 
     def close(self) -> None:
         self.total_recv["byte"] = self.connection.total_recv
@@ -591,6 +563,7 @@ class Remote:
             if nohandle:
                 raise e
 
+    @overload
     async def request(
         self,
         meth: str,
@@ -598,9 +571,33 @@ class Remote:
         *,
         callback: Callable = None,
         nohandle: bool = False,
-        timeout: float = 0,
         quiet: bool = False,
     ) -> Future:
+        ...
+
+    @overload
+    async def request(
+        self,
+        meth: str,
+        params: Union[dict, list, tuple] = None,
+        *,
+        callback: Callable = None,
+        nohandle: bool = False,
+        quiet: bool = False,
+        timeout: float,
+    ) -> Union[dict, list]:
+        ...
+
+    async def request(
+        self,
+        meth: str,
+        params: Union[dict, list, tuple] = None,
+        *,
+        callback: Callable = None,
+        nohandle: bool = False,
+        quiet: bool = False,
+        timeout: float = 0,
+    ) -> Union[Union[dict, list], Future]:
         """Assemble a JSON-RPC Request with the given data. Send the Request,
             and return a Future to represent the eventual result.
         """
@@ -637,47 +634,9 @@ class Remote:
                 raise e
         finally:
             if timeout > 0:
-                return wait_for(future, timeout)
+                return await wait_for(future, timeout)
             else:
                 return future
-
-    async def request_wait(
-        self,
-        meth: str,
-        params: Union[dict, list, tuple] = None,
-        default: Any = None,
-        *,
-        callback: Callable = None,
-        nohandle: bool = False,
-        timeout: float = 10,
-        raise_remote_err: bool = False,
-    ) -> Any:
-        """Send a JSON-RPC Request with the given data, the same as
-            `Remote.request()`. However, rather than return the Future, handle
-            it, and return None if the request timed out or (unless specified)
-            yielded an Error Response.
-        """
-        if self.open:
-            future = await self.request(
-                meth, params, callback=callback, nohandle=nohandle
-            )
-            try:
-                if timeout > 0:
-                    await wait_for(future, timeout)
-                else:
-                    await future
-
-            except RemoteError as e:
-                if raise_remote_err:
-                    raise e
-                else:
-                    return default
-            except (CancelledError, TimeoutError):
-                warn(f"{meth} Request timed out.")
-                return default
-
-            else:
-                return future.result()
 
     async def respond(
         self,
