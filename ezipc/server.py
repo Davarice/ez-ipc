@@ -241,7 +241,6 @@ class Server:
 
         self.server = None
         echo("dcon", "Server closed.")
-        echo(list(map(str, self.listeners)))
 
     async def open_connection(self, str_in: StreamReader, str_out: StreamWriter):
         """Callback executed by AsyncIO when a Client contacts the Server."""
