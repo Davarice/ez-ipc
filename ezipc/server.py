@@ -25,7 +25,7 @@ from .remote import (
     request_handler,
     rpc_response,
 )
-from .util import callback_response, echo, err, hl_method, P, warn
+from .util import callback_response, echo, err, hl_method, P, T, warn
 
 
 __all__ = (
@@ -220,18 +220,20 @@ class Server:
 
     def drop(self, remote: Remote):
         if remote in self.remotes:
+            self.remotes.remove(remote)
             self.total_sent.update(remote.total_sent)
             self.total_recv.update(remote.total_recv)
-            self.remotes.remove(remote)
 
     async def terminate(self, reason: str = "Server Closing"):
         for remote in list(self.remotes):
-            await remote.terminate(reason)
-            self.drop(remote)
-        self.remotes.clear()
+            try:
+                await remote.terminate(reason)
+            except Exception as e:
+                warn(f"Unknown Error from {remote!r}:", e)
+            finally:
+                self.drop(remote)
 
-        for task in self.listeners:
-            task.cancel()
+        self.remotes.clear()
 
         if self.server.is_serving():
             self.server.close()
@@ -239,16 +241,14 @@ class Server:
 
         self.server = None
         echo("dcon", "Server closed.")
+        echo(list(map(str, self.listeners)))
 
     async def open_connection(self, str_in: StreamReader, str_out: StreamWriter):
         """Callback executed by AsyncIO when a Client contacts the Server."""
-        echo(
-            "con",
-            "Incoming Connection from Client at `{}`.".format(
-                str_out.get_extra_info("peername", ("Unknown Address", 0))[0]
-            ),
-        )
         remote = Remote(self.eventloop, str_in, str_out, rtype="Client")
+        echo(
+            "con", f"Incoming Connection from Client at {T.bold_green(remote.host)}.",
+        )
         self.total_clients += 1
 
         # Update the Client Hooks with our own.
@@ -262,16 +262,8 @@ class Server:
         listening = self.eventloop.create_task(remote.loop(self.helpers))
         self.listeners.add(listening)
 
-        def cb(*_):
-            if listening in self.listeners:
-                self.listeners.remove(listening)
-
-        listening.add_done_callback(cb)
-
-        # # Encrypt the Remote Connection.
-        # rsa = self.eventloop.create_task(self.encrypt_remote(remote))
-
         for hook in self.hooks_connection:
+            # Run all necessary Connection Hooks.
             try:
                 await hook(remote)
             except Exception as e:
@@ -287,13 +279,22 @@ class Server:
         except CancelledError:
             pass
 
+        except Exception as e:
+            warn(f"Unknown Error from {remote!r}:", e)
+
         finally:
+            if listening in self.listeners:
+                self.listeners.remove(listening)
             try:
                 for hook in self.hooks_disconnect:
                     try:
                         await hook(remote)
                     except Exception as e:
                         err(f"Failed to run {hook.__name__!r} on {remote!r}:", e)
+
+            except Exception as e:
+                warn(f"Unknown Error from {remote!r}:", e)
+
             finally:
                 self.drop(remote)
 

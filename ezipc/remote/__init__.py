@@ -270,7 +270,7 @@ class Remote:
                 try:
                     return hooks[msg.method](msg, self)
                 except Exception as e:
-                    warn("Unknown Error:", e)
+                    warn(f"Unknown Error on {msg.method!r} Request from {self!r}:", e)
                     return e
             else:
                 # We have no hook for this method; Return an Error.
@@ -299,7 +299,10 @@ class Remote:
                 try:
                     return hooks[msg.method](msg, self)
                 except Exception as e:
-                    warn("Unknown Error:", e)
+                    warn(
+                        f"Unknown Error on {msg.method!r} Notification from {self!r}:",
+                        e,
+                    )
                     return e
             else:
                 # We have no hook for this method; Return an Error.
@@ -363,6 +366,20 @@ class Remote:
                     await self.respond(None, err=Error.parse_error(str(e)))
                 except UnicodeDecodeError:
                     warn(f"Corrupt data received from {self!r}.")
+
+                except CancelledError:
+                    raise
+
+                except ConnectionError as e:
+                    # Whatever just happened was too much to just die calmly.
+                    #   Close down the entire Remote.
+                    if self.open:
+                        self.close()
+                        echo("dcon", f"Connection with {self} closed: {e}")
+
+                except Exception as e:
+                    err_("Unknown Exception:", e)
+                    raise e
 
                 else:
                     responses: Batch = Batch()
@@ -452,8 +469,8 @@ class Remote:
                         await self.send_batch(responses)
                     # # # ============== # # #
 
+                    # Now, handle any Cleanup required by Generators.
                     for original in data.values():
-                        # Now, handle any Cleanup required by Generators.
                         if isinstance(original, AsyncGenerator):
                             async for _ in original:
                                 pass
@@ -495,7 +512,7 @@ class Remote:
                     revive()
         finally:
             # Kill Tasks.
-            g = gather(*helpers)
+            g = gather(*helpers, return_exceptions=True)
 
             if g.cancel():
                 await g
@@ -544,8 +561,7 @@ class Remote:
 
         finally:
             self.close()
-            if not helper_runner.done():
-                helper_runner.cancel()
+            if helper_runner.cancel():
                 await helper_runner
 
     async def notif(
